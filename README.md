@@ -34,6 +34,10 @@ AnilistProject/
    ```bash
    streamlit run app/main.py
    ```
+   *(Note: If the `streamlit` command is not recognized due to PATH issues, use Python directly instead:)*
+   ```bash
+   python -m streamlit run app/main.py
+   ```
 
 ## 💡 How it Works
 1. Enter an AniList Username in the sidebar (e.g., `arsid`).
