@@ -66,7 +66,7 @@ def train_pruned_tree(X_train, y_train, X_val, y_val):
 def train_and_evaluate_all_models(username: str) -> Dict[str, Any]:
     """Runs the entire pipeline for a username, evaluates models, saves best."""
     # 1. Fetch & Build Dataset
-    df_raw = build_user_dataframe(username, save_csv=True)
+    df_raw = build_user_dataframe(username, force_refresh=True, save_csv=True)
     if df_raw.empty or len(df_raw) < 10:
         return {"status": "error", "message": f"Dataset for {username} is too small."}
         

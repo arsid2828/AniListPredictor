@@ -22,12 +22,12 @@ def parse_date(date_dict):
             return None
     return None
 
-def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
+def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: bool = True) -> pd.DataFrame:
     """
     Fetch user list from cache/API, flatten it, and return a clean DataFrame.
     Filters out uncategorized or completely missing score items.
     """
-    raw_data = fetch_user_anime_list(username)
+    raw_data = fetch_user_anime_list(username, force_refresh=force_refresh)
     if not raw_data:
         logger.error(f"No data retrieved for {username}. Cannot build dataset.")
         return pd.DataFrame()
@@ -47,8 +47,10 @@ def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
             studios_data = media.get('studios', {}).get('edges', [])
             # In feature engineering we will handle strings, here we just extract main ones
             main_studios = [s['node']['name'] for s in studios_data if s.get('isMain')]
+            producers = [s['node']['name'] for s in studios_data if not s.get('isMain')]
             all_studios = [s['node']['name'] for s in studios_data]
             studio_str = ", ".join(main_studios) if main_studios else ", ".join(all_studios)
+            producer_str = ", ".join(producers)
             
             # Flatten tags with their rank (percentage of affinity)
             tags_str_list = []
@@ -80,13 +82,17 @@ def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
                 'season': media.get('season'),
                 'seasonYear': media.get('seasonYear'),
                 'averageScore': media.get('averageScore'),
+                'meanScore': media.get('meanScore'),
+                'favourites': media.get('favourites'),
+                'isAdult': 1 if media.get('isAdult') else 0,
                 'popularity': media.get('popularity'),
                 'countryOfOrigin': media.get('countryOfOrigin'),
                 'source': media.get('source'),
                 'media_status': media.get('status'),
                 'genres': ", ".join(media.get('genres', [])),
                 'tags': ", ".join(tags_str_list),
-                'studios': studio_str
+                'studios': studio_str,
+                'producers': producer_str
             }
             rows.append(row)
             

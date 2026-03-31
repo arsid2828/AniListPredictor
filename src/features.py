@@ -38,6 +38,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         'genre_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'tag_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'studio_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
+        'producer_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'format_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'diff_from_global': {'sum': 0.0, 'count': 0} # Regular dict, not defaultdict
     }
@@ -80,6 +81,14 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
                 studio_means.append(state['studio_scores'][s]['sum'] / state['studio_scores'][s]['count'])
         studio_affinity = np.mean(studio_means) if len(studio_means) > 0 else np.nan
         
+        # Producer affinity
+        producers = _get_list(row.get('producers', ''))
+        producer_means = []
+        for p in producers:
+            if state['producer_scores'][p]['count'] > 0:
+                producer_means.append(state['producer_scores'][p]['sum'] / state['producer_scores'][p]['count'])
+        producer_affinity = np.mean(producer_means) if len(producer_means) > 0 else np.nan
+        
         # Global critic alignment (does user usually rate higher or lower than MAL/AniList global?)
         user_global_diff = state['diff_from_global']['sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
         
@@ -90,6 +99,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             'hist_genre_affinity': genre_affinity,
             'hist_tag_affinity': tag_affinity,
             'hist_studio_affinity': studio_affinity,
+            'hist_producer_affinity': producer_affinity,
             'hist_global_diff': user_global_diff
         })
         
@@ -114,6 +124,10 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             state['studio_scores'][s]['sum'] += score
             state['studio_scores'][s]['count'] += 1
             
+        for p in producers:
+            state['producer_scores'][p]['sum'] += score
+            state['producer_scores'][p]['count'] += 1
+            
         global_score = row['averageScore']
         if pd.notna(global_score) and global_score > 0:
             # AniList global score is 0-100, scale to 0-10
@@ -135,6 +149,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df['sort_date'] = df['completedAt'].fillna(df['updatedAt'])
         
     df['sort_date'] = pd.to_datetime(df['sort_date'], errors='coerce')
+    df['sort_date'] = df['sort_date'].fillna(pd.Timestamp('1970-01-01'))
     df = df.sort_values('sort_date').reset_index(drop=True)
     
     # Create lag / historical features
@@ -143,7 +158,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # Fill NAs in historical features with global fallbacks
     # e.g., if genre_affinity is NaN, fallback to user_mean, then to global fixed mean (e.g., 5.0)
     df['hist_user_mean'] = df['hist_user_mean'].fillna(df['user_score'].mean() if len(df) > 0 else 5.0)
-    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity']:
+    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity']:
         df[col] = df[col].fillna(df['hist_user_mean'])
         
     # Standard Anime Numeric Features
@@ -154,8 +169,16 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     avg_score_median = df['averageScore'].median() if not df['averageScore'].isna().all() else 70.0
     df['averageScore'] = df['averageScore'].fillna(avg_score_median) / 10.0 # scale 0-10
     
+    mean_score_median = df['meanScore'].median() if not df['meanScore'].isna().all() else 70.0
+    df['meanScore'] = df['meanScore'].fillna(mean_score_median) / 10.0 # scale 0-10
+    
     pop_median = df['popularity'].median() if not df['popularity'].isna().all() else 1000.0
     df['popularity'] = np.log1p(df['popularity'].fillna(pop_median)) # Log transform for heavy skew
+    
+    fav_median = df['favourites'].median() if not df['favourites'].isna().all() else 10.0
+    df['favourites'] = np.log1p(df['favourites'].fillna(fav_median))
+    
+    df['isAdult'] = df['isAdult'].fillna(0).astype(int)
     
     # Anime Categorical (One-Hot / Multi-Hot)
     # 1. Base Dummies
@@ -181,9 +204,9 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine Base, Numerical, Historical, and Categorical
-    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity']
+    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'meanScore', 'popularity', 'favourites', 'isAdult']
     hist_cols = ['hist_user_mean', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 
-                 'hist_tag_affinity', 'hist_studio_affinity', 'hist_global_diff']
+                 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_global_diff']
                  
     X = pd.concat([df[num_cols + hist_cols], df_cat], axis=1)
     y = df['user_score']
@@ -221,8 +244,10 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
     
     studios_data = anime_data_dict.get('studios', {}).get('edges', [])
     main_studios = [s['node']['name'] for s in studios_data if s.get('isMain')]
+    producers = [s['node']['name'] for s in studios_data if not s.get('isMain')]
     all_studios = [s['node']['name'] for s in studios_data]
     studio_str = ", ".join(main_studios) if main_studios else ", ".join(all_studios)
+    producer_str = ", ".join(producers)
     
     tags_str_list = []
     for t in anime_data_dict.get('tags', []):
@@ -238,11 +263,15 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
         'season': anime_data_dict.get('season'),
         'seasonYear': anime_data_dict.get('seasonYear'),
         'averageScore': anime_data_dict.get('averageScore'),
+        'meanScore': anime_data_dict.get('meanScore'),
+        'favourites': anime_data_dict.get('favourites'),
+        'isAdult': 1 if anime_data_dict.get('isAdult') else 0,
         'popularity': anime_data_dict.get('popularity'),
         'genres': ", ".join(anime_data_dict.get('genres', [])),
         'tags': ", ".join(tags_str_list),
         'studios': studio_str,
-        'sort_date': pd.Timestamp.now() # Put at the end of chronological history
+        'producers': producer_str,
+        'sort_date': pd.Timestamp('2100-01-01') # Put firmly at the absolute end of history
     }
     
     new_df = pd.DataFrame([row])

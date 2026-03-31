@@ -40,6 +40,8 @@ query ($userName: String, $chunk: Int) {
           seasonYear
           averageScore
           meanScore
+          favourites
+          isAdult
           popularity
           countryOfOrigin
           source
@@ -76,6 +78,8 @@ query ($search: String) {
       seasonYear
       averageScore
       meanScore
+      favourites
+      isAdult
       popularity
       countryOfOrigin
       source
