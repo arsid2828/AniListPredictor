@@ -1,0 +1,16 @@
+# Custom project directories
+cache/
+data/
+models/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
