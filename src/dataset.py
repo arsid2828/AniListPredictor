@@ -50,11 +50,12 @@ def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
             all_studios = [s['node']['name'] for s in studios_data]
             studio_str = ", ".join(main_studios) if main_studios else ", ".join(all_studios)
             
-            # Flatten tags (keep top 20 by rank to avoid massive bloat, configurable)
-            tags_data = media.get('tags', [])
-            # Filter non-spoiler/useful tags primarily? Let's just sort by rank and take top 15
-            tags_sorted = sorted(tags_data, key=lambda x: x.get('rank', 0), reverse=True)
-            top_tags = [t['name'] for t in tags_sorted[:20]]
+            # Flatten tags with their rank (percentage of affinity)
+            tags_str_list = []
+            for t in media.get('tags', []):
+                t_name = str(t['name']).replace('=', '-').replace(',', '') # sanitize
+                t_rank = t.get('rank', 0)
+                tags_str_list.append(f"{t_name}={t_rank}")
             
             # Get best title
             title_dict = media.get('title', {})
@@ -84,7 +85,7 @@ def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
                 'source': media.get('source'),
                 'media_status': media.get('status'),
                 'genres': ", ".join(media.get('genres', [])),
-                'tags': ", ".join(top_tags),
+                'tags': ", ".join(tags_str_list),
                 'studios': studio_str
             }
             rows.append(row)
@@ -92,6 +93,9 @@ def build_user_dataframe(username: str, save_csv: bool = True) -> pd.DataFrame:
     df = pd.DataFrame(rows)
     if df.empty:
         return df
+        
+    # Deduplica: se un utente ha un anime in "Completed" e anche in una "Custom List", GraphQL lo restituisce 2 volte.
+    df = df.drop_duplicates(subset=['mediaId']).copy()
         
     # --- Clean up & Filtering ---
     # We are predicting user score. Filter out entries with score == 0 (unrated).

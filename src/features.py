@@ -10,6 +10,23 @@ def _get_list(val):
         return []
     return [x.strip() for x in str(val).split(",")]
 
+def _get_tags_with_ranks(val):
+    if pd.isna(val) or not val:
+        return {}
+    res = {}
+    for x in str(val).split(","):
+        x = x.strip()
+        if not x: continue
+        parts = x.rsplit('=', 1)
+        if len(parts) == 2:
+            try:
+                res[parts[0]] = float(parts[1])
+            except:
+                res[parts[0]] = 0.0
+        else:
+            res[parts[0]] = 100.0
+    return res
+
 def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Creates leakage-free historical features using a running state over the chronologically sorted dataset.
@@ -43,13 +60,17 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
                 genre_means.append(state['genre_scores'][g]['sum'] / state['genre_scores'][g]['count'])
         genre_affinity = np.mean(genre_means) if len(genre_means) > 0 else np.nan
         
-        # Tag affinity
-        tags = _get_list(row['tags'])
+        # Tag affinity (weighted by current anime tag rank)
+        tags_dict = _get_tags_with_ranks(row['tags'])
         tag_means = []
-        for t in tags:
+        weights = []
+        for t, rank in tags_dict.items():
             if state['tag_scores'][t]['count'] > 0:
-                tag_means.append(state['tag_scores'][t]['sum'] / state['tag_scores'][t]['count'])
-        tag_affinity = np.mean(tag_means) if len(tag_means) > 0 else np.nan
+                score_for_tag = state['tag_scores'][t]['sum'] / state['tag_scores'][t]['count']
+                tag_means.append(score_for_tag)
+                weights.append(rank + 1.0) # Avoid 0 weight zeroing out valid historical means
+                
+        tag_affinity = np.average(tag_means, weights=weights) if len(tag_means) > 0 else np.nan
         
         # Studio affinity
         studios = _get_list(row['studios'])
@@ -85,7 +106,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             state['genre_scores'][g]['sum'] += score
             state['genre_scores'][g]['count'] += 1
             
-        for t in tags:
+        for t, rank in tags_dict.items():
             state['tag_scores'][t]['sum'] += score
             state['tag_scores'][t]['count'] += 1
             
@@ -141,17 +162,23 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     categorical_cols = ['format', 'season', 'source']
     df_cat = pd.get_dummies(df[categorical_cols], dummy_na=True, drop_first=False)
     
-    # 2. Multi-Hot Genres (top 15)
-    all_genres = df['genres'].apply(_get_list).explode()
-    top_genres = all_genres.value_counts().head(15).index.tolist()
-    for g in top_genres:
-        df_cat[f'genre_{g}'] = df['genres'].apply(lambda x: 1 if g in _get_list(x) else 0)
+    # 2. All Genres Multi-Hot
+    all_genres = set()
+    for row_genres in df['genres']:
+        all_genres.update(_get_list(row_genres))
         
-    # 3. Multi-Hot Tags (top 30)
-    all_tags = df['tags'].apply(_get_list).explode()
-    top_tags = all_tags.value_counts().head(30).index.tolist()
-    for t in top_tags:
-        df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: 1 if t in _get_list(x) else 0)
+    for g in all_genres:
+        if not g: continue
+        df_cat[f'genre_{g}'] = df['genres'].apply(lambda x: 1.0 if g in _get_list(x) else 0.0)
+        
+    # 3. All Tags Multi-Hot with Ranks
+    all_tags = set()
+    for row_tags in df['tags']:
+        all_tags.update(_get_tags_with_ranks(row_tags).keys())
+        
+    for t in all_tags:
+        if not t: continue
+        df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine Base, Numerical, Historical, and Categorical
     num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity']
@@ -197,9 +224,11 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
     all_studios = [s['node']['name'] for s in studios_data]
     studio_str = ", ".join(main_studios) if main_studios else ", ".join(all_studios)
     
-    tags_data = anime_data_dict.get('tags', [])
-    tags_sorted = sorted(tags_data, key=lambda x: x.get('rank', 0), reverse=True)
-    top_tags = [t['name'] for t in tags_sorted[:20]]
+    tags_str_list = []
+    for t in anime_data_dict.get('tags', []):
+        t_name = str(t['name']).replace('=', '-').replace(',', '')
+        t_rank = t.get('rank', 0)
+        tags_str_list.append(f"{t_name}={t_rank}")
     
     row = {
         'user_score': np.nan, # Unknown target
@@ -211,7 +240,7 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
         'averageScore': anime_data_dict.get('averageScore'),
         'popularity': anime_data_dict.get('popularity'),
         'genres': ", ".join(anime_data_dict.get('genres', [])),
-        'tags': ", ".join(top_tags),
+        'tags': ", ".join(tags_str_list),
         'studios': studio_str,
         'sort_date': pd.Timestamp.now() # Put at the end of chronological history
     }

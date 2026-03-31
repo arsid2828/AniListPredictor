@@ -98,6 +98,7 @@ if st.session_state["model_trained"]:
                 # 2. Predict
                 model = model_artifact['model']
                 predicted_score = model.predict(X_infer)[0]
+                predicted_score = float(np.clip(predicted_score, 0.0, 10.0))
                 
             st.success(f"### Predicted Score for {username}: {predicted_score:.2f} / 10")
             
@@ -108,6 +109,25 @@ if st.session_state["model_trained"]:
             with col2:
                 glob_mean = (top_anime.get('averageScore') or 0) / 10.0
                 st.metric(label="Global Average Score", value=f"{glob_mean:.2f}")
+
+            # Transparency / Explainability block
+            st.markdown("---")
+            st.subheader("💡 Perché questo voto?")
+            st.markdown("Ecco i valori storici calcolati da zero (fino al momento precedente a questo anime) delle **caratteristiche che hanno pesato maggiormente** in questa singola scelta dell'A.I.:")
+            
+            top_feat_dict = model_artifact.get('feature_importance')
+            if top_feat_dict:
+                top_6_cols = [x['Feature'] for x in top_feat_dict][:6]
+                for c in top_6_cols:
+                    val = X_infer.iloc[0][c]
+                    # Format correctly
+                    if isinstance(val, (float, np.floating)):
+                        form = f"{val:.3f}"
+                    else:
+                        form = str(val)
+                    st.write(f"- Valore del recensore in **{c}**: `{form}`")
+            else:
+                st.info("Le origini matematiche dettagliate per questo modello di classificazione non sono disponibili.")
 else:
     st.info("Please enter a username and train models on their history in the sidebar first.")
     

@@ -8,7 +8,7 @@ from typing import Dict, Any
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.tree import DecisionTreeRegressor
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, VotingRegressor
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -100,7 +100,11 @@ def train_and_evaluate_all_models(username: str) -> Dict[str, Any]:
         'Decision Tree (Raw)': DecisionTreeRegressor(random_state=42, min_samples_leaf=3),
         'Decision Tree (Pruned)': train_pruned_tree(X_train, y_train, X_val, y_val),
         'Random Forest': RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=42),
-        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
+        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42),
+        'Voting Ensemble (Smooth)': VotingRegressor([
+            ('rf', RandomForestRegressor(n_estimators=100, min_samples_leaf=1, random_state=42)),
+            ('ridge', Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=5.0))]))
+        ], weights=[0.6, 0.4])
     }
 
     # 5. Train & Evaluate
@@ -120,8 +124,9 @@ def train_and_evaluate_all_models(username: str) -> Dict[str, Any]:
     results_df = pd.DataFrame(results).sort_values('MAE')
     logger.info(f"\nModel Comparison for {username}:\n" + results_df.to_string(index=False))
     
-    # 6. Select Best Model (Excluding Baseline if it's best to show ML potential, unless ML is terrible)
-    best_model_name = results_df.iloc[0]['model']
+    # 6. Select Best Model
+    # Forziamo l'uso del Voting Ensemble per garantire continuità nei decimali (niente gradini dell'albero!)
+    best_model_name = 'Voting Ensemble (Smooth)'
     best_model = trained_models[best_model_name]
     
     # Extract Feature Importance (if tree based)
@@ -131,6 +136,14 @@ def train_and_evaluate_all_models(username: str) -> Dict[str, Any]:
             'Feature': X_train.columns,
             'Importance': best_model.feature_importances_
         }).sort_values('Importance', ascending=False).head(15).to_dict('records')
+    elif hasattr(best_model, 'estimators_'):
+        for est in best_model.estimators_:
+            if hasattr(est, 'feature_importances_'):
+                feature_importance = pd.DataFrame({
+                    'Feature': X_train.columns,
+                    'Importance': est.feature_importances_
+                }).sort_values('Importance', ascending=False).head(15).to_dict('records')
+                break
     elif isinstance(best_model, Pipeline) and hasattr(best_model.steps[-1][1], 'feature_importances_'):
          feature_importance = pd.DataFrame({
             'Feature': X_train.columns,
