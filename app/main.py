@@ -98,6 +98,24 @@ if st.session_state["model_trained"]:
                 # 2. Predict
                 model = model_artifact['model']
                 predicted_score = model.predict(X_infer)[0]
+                original_pred = predicted_score
+
+                # 3. Applicazione Euristica Umana (Regole Manuali per Casi Estremi)
+                try:
+                    adult_ratio = user_history_df['isAdult'].mean() if 'isAdult' in user_history_df.columns else 0
+                    is_target_adult = top_anime.get('isAdult', False)
+                    is_target_hentai = 'Hentai' in top_anime.get('genres', [])
+                    
+                    if (is_target_adult or is_target_hentai) and adult_ratio < 0.03:
+                        if is_target_hentai:
+                            predicted_score -= 3.0
+                            st.warning("⚠️ **Penalità Anti-Target (-3.0):** Contenuto esplicito (Hentai) fortemente penalizzato perché non presente quasi per nulla nel tuo storico.")
+                        else:
+                            predicted_score -= 2.0
+                            st.warning("⚠️ **Penalità Anti-Target (-2.0):** Contenuto categorizzato per Adulti (18+) o fortemente Ecchi spinto, penalizzato perché fuori dalla tua comfort-zone.")
+                except Exception as e:
+                    pass
+
                 predicted_score = float(np.clip(predicted_score, 0.0, 10.0))
                 
             st.success(f"### Predicted Score for {username}: {predicted_score:.2f} / 10")
@@ -117,15 +135,82 @@ if st.session_state["model_trained"]:
             
             top_feat_dict = model_artifact.get('feature_importance')
             if top_feat_dict:
-                top_6_cols = [x['Feature'] for x in top_feat_dict][:6]
-                for c in top_6_cols:
+                feature_translations = {
+                    'averageScore': 'Voto Globale del Pubblico',
+                    'meanScore': 'Media Voti Critica Mondiale',
+                    'popularity': 'Popolarità / Visualizzazioni',
+                    'duration': 'Durata Episodica in minuti',
+                    'episodes': 'Numero di Episodi',
+                    'hist_user_mean': 'Tua Media Voti Storica',
+                    'hist_format_affinity': 'Tua Affinità a questo Formato',
+                    'hist_genre_affinity': 'Tua Affinità a questi Generi',
+                    'hist_tag_affinity': 'Tua Affinità a queste Tematiche (Tag)',
+                    'hist_studio_affinity': 'Tuo Storico con questo Studio',
+                    'hist_producer_affinity': 'Tuo Storico con questi Produttori',
+                    'hist_global_diff': 'Tuo Scarto dal Pubblico (Hater/Fanboy)',
+                    'hist_global_mae': 'Tua Imprevedibilità (Contrarian Score)',
+                    'favourites': 'Amore Globale (Favourites)',
+                    'isAdult': 'Contenuto per Adulti (18+)'
+                }
+
+                def t_feat(f):
+                    if f in feature_translations: return feature_translations[f]
+                    if f.startswith('genre_'): return f"Presenza Genere {f.replace('genre_', '')}"
+                    if f.startswith('tag_'): return f"Tema Centrale {f.replace('tag_', '')}"
+                    if f.startswith('format_'): return f"Formato Variante {f.replace('format_', '')}"
+                    return f
+                    
+                for x in top_feat_dict[:6]:
+                    c = x['Feature']
+                    imp = x['Importance'] * 100.0
                     val = X_infer.iloc[0][c]
-                    # Format correctly
-                    if isinstance(val, (float, np.floating)):
+                    
+                    if imp > 20: imp_msg = "Impatto Severo 🔥"
+                    elif imp > 10: imp_msg = "Molto Alto ⭐"
+                    elif imp > 5: imp_msg = "Rilevante 📈"
+                    else: imp_msg = "Sfumatura 🔹"
+                    
+                    # Convert log counts back
+                    if c in ['popularity', 'favourites'] and val > 0:
+                        val_num = int(np.expm1(val))
+                        form = f"{val_num:,} utenti".replace(',', '.')
+                    elif c.startswith('tag_') or c.startswith('genre_') or c == 'isAdult':
+                        if c.startswith('tag_') and val > 0.0:
+                            form = f"Allineato al {int(val*100)}%"
+                        else:
+                            form = "Sì" if val > 0.0 else "No"
+                    elif isinstance(val, (float, np.floating)):
                         form = f"{val:.3f}"
                     else:
                         form = str(val)
-                    st.write(f"- Valore del recensore in **{c}**: `{form}`")
+                        
+                    # Perturbation test to find logical direction
+                    X_base = X_infer.copy()
+                    if c in ['averageScore', 'meanScore']:
+                        neutral = 7.0
+                    elif c.startswith('hist_'):
+                        neutral = hist_mean
+                    elif c == 'popularity':
+                        neutral = float(np.log1p(1000))
+                    elif c == 'favourites':
+                        neutral = float(np.log1p(10))
+                    elif c == 'duration':
+                        neutral = 24.0
+                    else:
+                        neutral = 0.0
+                        
+                    X_base.iloc[0, X_base.columns.get_loc(c)] = neutral
+                    pred_without = model.predict(X_base)[0]
+                    impact = original_pred - pred_without
+                    
+                    if impact > 0.01:
+                        dir_icon = f"⬆️ Ha spinto il voto in SU di +{impact:.2f}"
+                    elif impact < -0.01:
+                        dir_icon = f"⬇️ Ha affossato il voto di {impact:.2f}"
+                    else:
+                        dir_icon = "⚖️ Impatto stabile bilanciato"
+                        
+                    st.write(f"- **{t_feat(c)}**: `{form}`  \n  > *(🧠 Peso decisorio: **{imp:.1f}%** | {dir_icon})*")
             else:
                 st.info("Le origini matematiche dettagliate per questo modello di classificazione non sono disponibili.")
 else:

@@ -40,7 +40,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         'studio_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'producer_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'format_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
-        'diff_from_global': {'sum': 0.0, 'count': 0} # Regular dict, not defaultdict
+        'diff_from_global': {'sum': 0.0, 'abs_sum': 0.0, 'count': 0} # Regular dict
     }
     
     historical_features = []
@@ -91,6 +91,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         
         # Global critic alignment (does user usually rate higher or lower than MAL/AniList global?)
         user_global_diff = state['diff_from_global']['sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
+        user_global_mae = state['diff_from_global']['abs_sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
         
         historical_features.append({
             'hist_user_mean': user_mean,
@@ -100,7 +101,8 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             'hist_tag_affinity': tag_affinity,
             'hist_studio_affinity': studio_affinity,
             'hist_producer_affinity': producer_affinity,
-            'hist_global_diff': user_global_diff
+            'hist_global_diff': user_global_diff,
+            'hist_global_mae': user_global_mae
         })
         
         # --- 2. Update state with CURRENT row ---
@@ -134,6 +136,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             global_10 = global_score / 10.0
             diff = score - global_10
             state['diff_from_global']['sum'] += diff
+            state['diff_from_global']['abs_sum'] += abs(diff)
             state['diff_from_global']['count'] += 1
 
     hist_df = pd.DataFrame(historical_features)
@@ -206,7 +209,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # Combine Base, Numerical, Historical, and Categorical
     num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'meanScore', 'popularity', 'favourites', 'isAdult']
     hist_cols = ['hist_user_mean', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 
-                 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_global_diff']
+                 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_global_diff', 'hist_global_mae']
                  
     X = pd.concat([df[num_cols + hist_cols], df_cat], axis=1)
     y = df['user_score']
