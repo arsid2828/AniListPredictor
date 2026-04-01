@@ -1,53 +1,45 @@
-# AniList Machine Learning Predictor
+# 🎬 AniList AI Predictor 🧠
 
-An end-to-end Machine Learning pipeline that predicts the precise score an AniList user will give to a specific anime.
+Un ecosistema di Machine Learning ibrido progettato da zero per analizzare, profilare e prevedere matematicamente i voti che un utente darà a un anime su [AniList](https://anilist.co/).
 
-## 🚀 Features
-- **Zero Data Leakage:** Implements strict temporal Train/Validation/Test splitting and historical tracking of user affinity (genres, studios, format) using only previously seen anime.
-- **Multiple Models:** Evaluates Baseline, KNN Regressor, Ridge, Decision Trees (Raw & Pruned), Random Forest, and Gradient Boosting.
-- **Full API Integration:** Native integration with AniList GraphQL API, with support for chunking, robust nested data gathering, and rate limiting.
-- **Interactive Web UI:** Simple Streamlit interface for seamless demonstration.
+Non si tratta di un semplice sistema di raccomandazione: questo modello studia a fondo i pattern latenti, le variazioni di umore e le preferenze cronologiche dell'utente. L'aspetto rivoluzionario risiede nell'architettura **"Leakage-Free"** (Zero Fuga di Dati), in quanto l'IA calcola i dati storici comportamentali come se viaggiasse nel tempo passo dopo passo.
 
-## 📁 Project Structure
-```
-AnilistProject/
-├── app/
-│   └── main.py          # Streamlit UI
-├── src/
-│   ├── api.py           # AniList GraphQL Fetcher
-│   ├── dataset.py       # Data flattening and basic cleaning
-│   ├── features.py      # Feature engineering and temporal encoding
-│   └── models.py        # ML pipelines, model training and evaluation
-├── cache/               # Automatic save dir for raw API queries
-├── data/                # Automatic save dir for cleaned CSVs
-└── models/              # Automatic save dir for trained ML `.pkl` files
-```
+## ✨ Caratteristiche Tecniche Avanzate
 
-## 🛠️ Installation & Execution
+*   **Leave-One-Out (LOO) Perturbation Test:** Il modello non si limita a dire "quanto puzza o profuma" la statistica. Clona una versione neutra dell'anime in background per dirti i decimi esatti (`+/- decimi di voto`) di cui ha abbassato o rialzato il voto finale per colpa di quello specifico attributo.
+*   **Recency Mood Bias:** Misuriamo la media mobile degli "ultimi 10 anime visti". Se l'utente in quel decennio era depresso o "di manica stretta", l'algoritmo scala proporzionalmente all'umore storico locale.
+*   **Contrarian Score (MAF Storico):** Il sistema non guarda solo il segno della devianza ma quantifica letteralmente se l'utente è un puro "Normie" (segue il voto della community) o un "Bastian Contrario", bilanciando quanto delegare l'output alla folla globale vs ai gusti unici dell'utente.
+*   **Protezione Out-of-Distribution (OOD):** Con regole euristiche umane, l'UI ha delle protezioni fisiche contro le allucinazioni algoritmiche (es: colpire con penalità pesantissime un tag "Hentai" per utenti che non ne guardano mai, bypassando l'inesperienza latente dell'Albero Decisionale).
 
-1. Ensure you have Python 3.9+ installed.
-2. Open a terminal and run the required installations:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the Streamlit Application:
-   ```bash
-   streamlit run app/main.py
-   ```
-   *(Note: If the `streamlit` command is not recognized due to PATH issues, use Python directly instead:)*
-   ```bash
-   python -m streamlit run app/main.py
-   ```
+---
 
-## 💡 How it Works
-1. Enter an AniList Username in the sidebar (e.g., `arsid`).
-2. The application will pull the entire user's rated anime list via GraphQL.
-3. It recursively sorts histories by `completedAt` to construct moving features (like `hist_genre_affinity`, `hist_studio_affinity`, and `hist_user_mean`). This guarantees absolutely zero temporal data leakage.
-4. Various regression models are built across scikit-learn paths. The winning model based on lowest MAE strictly selected over Test parameters is automatically cached.
-5. In the main page, type an anime title. The ML pipeline will extract matching features aligned exactly with the trained dataset, compute your realtime affinites, and output the predicted 0-10 score.
+## 🗂️ Struttura dei File
+Il progetto è suddiviso in una pipeline modulare MLOps:
 
-## ⚠️ Limitations & Notes
-- If an anime has missing data globally, we fall back to robust defaults (e.g., fixed global mean for NaNs).
-- Users with fewer than 10 scores are rejected, as predicting off less than 10 nodes results in garbage predictions.
-- The `ccp_alpha` logic is explicitly computed and validated automatically via cost-complexity pruning.
-- Deep Learning was explicitly excluded to provide transparent model explanations to support final conclusions on predictions.
+### 1. `src/api.py` (L'Estrattore)
+L'interfaccia di interrogazione **GraphQL** ufficiale di AniList. Costruita con gestione dei rate-limits, un retry esponenziale (backoff), e la paginazione automatica a Chunk. Ha un sistema di Caching locale per non assaltare il server e velocizzare la pulizia in locale.
+
+### 2. `src/dataset.py` (Il Raffinatore)
+Prende l'infinito dizionario destrutturato Json di AniList e lo appiattisce in un formato colonnare solido (`pandas`). È in questa fase che si separano in chirurgico isolamento metriche come gli Studi D'Animazione dai Produttori (es: *Aniplex*). Vengono rimossi i voti nulli troll e applicate le deviazioni standard.
+
+### 3. `src/features.py` (Il Motore del Feature Engineering)
+Il cuore pulsante del Machine Learning.
+Questo file non sbatte i dati così come sono nel modello ma crea il *"Tempo"*. Attraversa l'istante X della vita dell'utente con indici come `hist_tag_freq` e `hist_user_std`. Produce i dati categorici Multi-Hot di ultima generazione che valutano le percentuali d'impatto dei generi in base al rango specifico della serie.
+
+### 4. `src/models.py` (Il Cervello Ibrido)
+Traina il database e valuta i pesi usando una validazione incrociata intelligente nel tempo (`TimeSeriesSplit` personalizzato). 
+Il modello vincente è un potentissimo **Voting Ensemble** bilanciato:
+*   `60% Random Forest Regressor`: Perfetto per intercettare nicchie, eccezioni umane e incroci astratti ("Amo le commedie Ma SOLO se sono fatte dalla Sunrise, altrimenti odio la regia").
+*   `40% Ridge Regression`: Un modello lineare robusto. L'albero di Random Forest calcola per natura a "scalini", ma il Ridge arrotonda e smussa gli sbilanci permettendo voti ultraprecisi come `8.16` abolendo i blocchi interi da 8.00 o 9.00.
+
+### 5. `app/main.py` (La UI di Streamlit)
+Il banco di Prova visuale. Gestito in `Streamlit`.
+Dalla barra laterale si fetcha e allena dinamicamente il modello utente in base alla libreria AniList. Accoglie l'Inference Predictor visuale che scansiona in parallelo le URL delle Cover Image. Fornisce all'utente finale in chiaro il reverse-logaritmo delle percentuali e la stringa "umana" che giustifica ogni scelta calcolata per un voto.
+
+---
+
+## 🚀 Come cominciare:
+
+1. **Installazione librerie:** `pip install -r requirements.txt`
+2. **Avvio Server Locale:** `python -m streamlit run app/main.py`
+3. Usare la Sidebar a Sinistra per coniare e trainare dinamicamente la propria storia utente.
