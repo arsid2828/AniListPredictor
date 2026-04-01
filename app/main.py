@@ -83,9 +83,18 @@ if st.session_state["model_trained"]:
             top_anime = results[0]
             
             title = top_anime['title'].get('english') or top_anime['title'].get('romaji')
-            st.subheader(f"{title} ({top_anime.get('seasonYear', 'N/A')})")
-            st.write(f"**Format:** {top_anime.get('format')} | **Episodes:** {top_anime.get('episodes')}")
-            st.write(f"**Global Avg Score:** {top_anime.get('averageScore', 'N/A')}/100")
+            
+            # Display image and details side by side
+            col_img, col_txt = st.columns([1, 4])
+            with col_img:
+                cover_url = top_anime.get('coverImage', {}).get('extraLarge') or top_anime.get('coverImage', {}).get('large')
+                if cover_url:
+                    st.image(cover_url, use_container_width=True)
+            
+            with col_txt:
+                st.subheader(f"{title} ({top_anime.get('seasonYear', 'N/A')})")
+                st.write(f"**Format:** {top_anime.get('format')} | **Episodes:** {top_anime.get('episodes')}")
+                st.write(f"**Global Avg Score:** {top_anime.get('averageScore', 'N/A')}/100")
             
             with st.spinner("Extracting features and running prediction..."):
                 # 1. Feature Engineering (1 row)
@@ -137,16 +146,21 @@ if st.session_state["model_trained"]:
             if top_feat_dict:
                 feature_translations = {
                     'averageScore': 'Voto Globale del Pubblico',
-                    'meanScore': 'Media Voti Critica Mondiale',
                     'popularity': 'Popolarità / Visualizzazioni',
                     'duration': 'Durata Episodica in minuti',
                     'episodes': 'Numero di Episodi',
                     'hist_user_mean': 'Tua Media Voti Storica',
+                    'hist_user_std': 'Tua Deviazione (Volubilità Voti)',
+                    'recent_mean_score': 'Tuo Umore (Media Ultimi 10 Visti)',
                     'hist_format_affinity': 'Tua Affinità a questo Formato',
                     'hist_genre_affinity': 'Tua Affinità a questi Generi',
+                    'hist_genre_freq': 'Frequenza di Visione (% in questi Generi)',
                     'hist_tag_affinity': 'Tua Affinità a queste Tematiche (Tag)',
-                    'hist_studio_affinity': 'Tuo Storico con questo Studio',
-                    'hist_producer_affinity': 'Tuo Storico con questi Produttori',
+                    'hist_tag_freq': 'Frequenza di Visione (% con questi Tag)',
+                    'hist_studio_affinity': 'Tuo Storico Voti con questo Studio',
+                    'hist_studio_freq': 'Frequenza di Visione (% con questo Studio)',
+                    'hist_producer_affinity': 'Tuo Storico Voti con questi Produttori',
+                    'hist_producer_freq': 'Frequenza di Visione (% con questi Produttori)',
                     'hist_global_diff': 'Tuo Scarto dal Pubblico (Hater/Fanboy)',
                     'hist_global_mae': 'Tua Imprevedibilità (Contrarian Score)',
                     'favourites': 'Amore Globale (Favourites)',
@@ -158,6 +172,7 @@ if st.session_state["model_trained"]:
                     if f.startswith('genre_'): return f"Presenza Genere {f.replace('genre_', '')}"
                     if f.startswith('tag_'): return f"Tema Centrale {f.replace('tag_', '')}"
                     if f.startswith('format_'): return f"Formato Variante {f.replace('format_', '')}"
+                    if f.startswith('countryOfOrigin_'): return f"Paese di Origine {f.replace('countryOfOrigin_', '')}"
                     return f
                     
                 for x in top_feat_dict[:6]:
@@ -174,9 +189,11 @@ if st.session_state["model_trained"]:
                     if c in ['popularity', 'favourites'] and val > 0:
                         val_num = int(np.expm1(val))
                         form = f"{val_num:,} utenti".replace(',', '.')
-                    elif c.startswith('tag_') or c.startswith('genre_') or c == 'isAdult':
+                    elif c.startswith('tag_') or c.startswith('genre_') or c.startswith('countryOfOrigin_') or c.endswith('_freq') or c == 'isAdult':
                         if c.startswith('tag_') and val > 0.0:
                             form = f"Allineato al {int(val*100)}%"
+                        elif c.endswith('_freq'):
+                            form = f"Rappresenta il {int(val*100)}% del totale"
                         else:
                             form = "Sì" if val > 0.0 else "No"
                     elif isinstance(val, (float, np.floating)):
@@ -186,9 +203,11 @@ if st.session_state["model_trained"]:
                         
                     # Perturbation test to find logical direction
                     X_base = X_infer.copy()
-                    if c in ['averageScore', 'meanScore']:
+                    if c == 'averageScore':
                         neutral = 7.0
-                    elif c.startswith('hist_'):
+                    elif c.startswith('hist_') and c.endswith('_freq') or c == 'hist_user_std':
+                        neutral = 0.0
+                    elif c.startswith('hist_') or c == 'recent_mean_score':
                         neutral = hist_mean
                     elif c == 'popularity':
                         neutral = float(np.log1p(1000))

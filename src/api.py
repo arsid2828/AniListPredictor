@@ -90,6 +90,10 @@ query ($search: String) {
         rank
         category
       }
+      coverImage {
+        extraLarge
+        large
+      }
       studios {
         edges {
           isMain
