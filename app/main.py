@@ -14,13 +14,18 @@ from src.features import build_inference_features
 from src.models import train_and_evaluate_all_models
 from src.models import MODELS_DIR
 from src.dataset import DATA_DIR
+from src.cold_start import (
+    build_cold_start_profile, 
+    content_based_heuristic_scorer, 
+    generate_cold_start_recommendations,
+    GENRES_LIST, FORMATS_LIST, LENGTHS_LIST, ERAS_LIST
+)
 import joblib
 
 import logging
 logger = logging.getLogger(__name__)
 
 def check_planning_status(username, media_id):
-    from pathlib import Path
     cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
     if cache_path.exists():
         try:
@@ -35,318 +40,280 @@ def check_planning_status(username, media_id):
             pass
     return False
 
-st.set_page_config(page_title="AniList ML Predictor", layout="wide")
+def init_session_state():
+    if "username" not in st.session_state: st.session_state["username"] = ""
+    if "model_trained" not in st.session_state: st.session_state["model_trained"] = False
+    if "cs_favorites" not in st.session_state: st.session_state["cs_favorites"] = []
+    if "cs_profile" not in st.session_state: st.session_state["cs_profile"] = None
+    if "cs_step" not in st.session_state: st.session_state["cs_step"] = 1
+    if "recommendation_feedback" not in st.session_state: st.session_state["recommendation_feedback"] = {}
 
-st.title("🎬 AniList User Score Predictor (Machine Learning)")
-st.markdown("Predict the score a user will give to a specific anime based on their historical watch data using ML models avoiding data leakage.")
+st.set_page_config(page_title="AniList ML Predictor", layout="wide", page_icon="🎬")
+init_session_state()
 
-# Stateful variables
-if "username" not in st.session_state:
-    st.session_state["username"] = ""
-if "model_trained" not in st.session_state:
-    st.session_state["model_trained"] = False
+st.title("🎬 AniList User Score Predictor")
+st.markdown("Scopri quali anime adorerai, basandoti sul tuo storico o su un rapido onboarding!")
 
-# Sidebar for Setup & Training
-with st.sidebar:
-    st.header("1. Setup User Profile")
-    username_input = st.text_input("Enter AniList Username:", value="arsid")
-    if st.button("Fetch Data & Train Models"):
-        with st.spinner(f"Fetching data and training models for {username_input}... This might take a minute."):
-            st.session_state["username"] = username_input
-            result = train_and_evaluate_all_models(username_input)
-            if isinstance(result, dict) and result.get("status") == "error":
-                st.error(result["message"])
-                st.session_state["model_trained"] = False
-            else:
-                st.success("Models trained successfully!")
-                st.session_state["model_trained"] = True
+mode = st.sidebar.radio("Scegli Modalità:", ["Profilo AniList (Machine Learning)", "Nuovo Utente (Cold Start)"])
 
-# Main block for prediction
-if st.session_state["model_trained"]:
-    st.header(f"2. Predict Score for {st.session_state['username']}")
-    
-    # Load user dataset and model artifact
-    username = st.session_state["username"]
-    model_path = MODELS_DIR / f"{username}_best_model.pkl"
-    csv_path = DATA_DIR / f"{username}_clean.csv"
-    
-    try:
-        model_artifact = joblib.load(model_path)
-        user_history_df = pd.read_csv(csv_path)
-    except Exception as e:
-        st.error(f"Failed to load cached models or dataset: {e}. Please retrain.")
-        st.stop()
+if mode == "Profilo AniList (Machine Learning)":
+    # Sidebar for Setup & Training
+    with st.sidebar:
+        st.header("1. Setup User Profile")
+        username_input = st.text_input("Enter AniList Username:", value=st.session_state.get("username", "arsid"))
+        if st.button("Fetch Data & Train Models"):
+            with st.spinner(f"Fetching data and training models for {username_input}... This might take a minute."):
+                st.session_state["username"] = username_input
+                result = train_and_evaluate_all_models(username_input)
+                if isinstance(result, dict) and result.get("status") == "error":
+                    st.error(result["message"])
+                    st.session_state["model_trained"] = False
+                else:
+                    st.success("Models trained successfully!")
+                    st.session_state["model_trained"] = True
+
+    # Main block for prediction
+    if st.session_state["model_trained"]:
+        st.header(f"2. Dashboard per {st.session_state['username']}")
         
-    # Inform user about which model won
-    best_model_name = model_artifact['model_name']
-    cv_metrics = pd.DataFrame(model_artifact['metrics'])
-    
-    with st.expander("View Model Comparison Results"):
-        st.dataframe(cv_metrics)
-        st.write(f"**Selected Model:** {best_model_name}")
-        if model_artifact.get('feature_importance'):
-            st.write("**Top Feature Importances:**")
-            st.bar_chart(pd.DataFrame(model_artifact['feature_importance']).set_index('Feature'))
-
-    # === NEW SECTION: Top 10 Recommendations ===
-    st.markdown("---")
-    st.subheader("🌟 Top 10 Raccomandazioni (Non Visti)")
-    st.markdown("Scopri gli anime che ti piaceranno di più! Verranno analizzati i 500 anime più popolari e apprezzati, scartati quelli che hai già visto e valutati i restanti usando il tuo modello personalizzato.")
-    if st.button("Genera Top 10 Raccomandazioni", icon="✨"):
-        with st.spinner("Scarico i 500 anime candidati..."):
-            candidates = get_candidate_anime_for_recommendations(limit=500)
-            
-        with st.spinner("Controllo la tua lista ed estraggo le features (potrebbe richiedere un minuto)..."):
-            # Get watched list
-            from pathlib import Path
-            cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
-            watched_ids = set()
-            if cache_path.exists():
-                try:
-                    with open(cache_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        for lst in data:
-                            status = lst.get('status')
-                            for entry in lst.get('entries', []):
-                                m_id = entry.get('mediaId')
-                                if m_id and status != 'PLANNING':
-                                    watched_ids.add(m_id)
-                except:
-                    pass
-            
-            # Filter candidates (ignore if already in watched_ids)
-            valid_candidates = [c for c in candidates if c['id'] not in watched_ids]
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            results_list = []
-            
-            model = model_artifact['model']
-            train_columns = model_artifact['train_columns']
-            
-            # Ensure sort date exists
-            if 'sort_date' not in user_history_df.columns:
-                user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
-                
-            total_cands = len(valid_candidates)
-            for idx, cand in enumerate(valid_candidates):
-                if idx % 5 == 0 or idx == total_cands - 1:
-                    progress_bar.progress((idx + 1) / total_cands)
-                    status_text.text(f"Analizzando anime {idx+1} di {total_cands}...")
-                
-                try:
-                    X_infer = build_inference_features(cand, user_history_df, train_columns)
-                    pred = model.predict(X_infer)[0]
-                    # Same logic for adult/hentai penalty from previous heuristic
-                    adult_ratio = user_history_df['isAdult'].mean() if 'isAdult' in user_history_df.columns else 0
-                    is_target_adult = cand.get('isAdult', False)
-                    is_target_hentai = 'Hentai' in cand.get('genres', [])
-                    
-                    if (is_target_adult or is_target_hentai) and adult_ratio < 0.03:
-                        if is_target_hentai: pred -= 3.0
-                        else: pred -= 2.0
-                        
-                    pred = float(np.clip(pred, 0.0, 10.0))
-                    results_list.append((pred, cand))
-                except Exception as e:
-                    pass
-                    
-            progress_bar.empty()
-            status_text.empty()
-            
-            results_list.sort(key=lambda x: x[0], reverse=True)
-            top_10 = results_list[:10]
-            
-        st.success("Analisi Completata! Ecco i 10 anime che ti piaceranno di più:")
+        username = st.session_state["username"]
+        model_path = MODELS_DIR / f"{username}_best_model.pkl"
+        csv_path = DATA_DIR / f"{username}_clean.csv"
         
-        for i, (pred, cand) in enumerate(top_10):
-            title = cand['title'].get('english') or cand['title'].get('romaji')
-            col_img, col_txt = st.columns([1, 4])
-            with col_img:
-                cover_url = cand.get('coverImage', {}).get('large')
-                if cover_url:
-                    st.image(cover_url, use_container_width=True)
-            with col_txt:
-                st.markdown(f"#### #{i+1} - {title}")
-                st.write(f"**Score Previsto dal Modello:** {pred:.2f} / 10")
-                st.write(f"**Punteggio Globale:** {(cand.get('averageScore') or 0)/10:.2f} | **Episodi:** {cand.get('episodes', 'N/A')} | **Anno:** {cand.get('seasonYear', 'N/A')}")
-                st.write(f"**Generi:** {', '.join(cand.get('genres', []))}")
-                anilist_url = f"https://anilist.co/anime/{cand.get('id')}"
-                st.markdown(f"[➡️ Apri su AniList]({anilist_url})")
-            st.markdown("---")
+        try:
+            model_artifact = joblib.load(model_path)
+            user_history_df = pd.read_csv(csv_path)
+        except Exception as e:
+            st.error(f"Failed to load cached models or dataset: {e}. Please retrain.")
+            st.stop()
+            
+        best_model_name = model_artifact['model_name']
+        cv_metrics = pd.DataFrame(model_artifact['metrics'])
+        
+        with st.expander("Visualizza Dettagli Modello"):
+            st.dataframe(cv_metrics)
+            st.write(f"**Modello Selezionato:** {best_model_name}")
+            if model_artifact.get('feature_importance'):
+                st.write("**Top Feature Importances:**")
+                st.bar_chart(pd.DataFrame(model_artifact['feature_importance']).set_index('Feature'))
 
-    st.subheader("🔍 Predict Score for a Specific Anime")
-    anime_query = st.text_input("Enter Anime Title (e.g., 'Frieren', 'Attack on Titan'):")
-    
-    if anime_query and st.button("Search & Predict"):
-        with st.spinner("Searching AniList..."):
-            results = search_anime_by_title(anime_query)
-            
-        if not results:
-            st.warning("No anime found matching that title.")
-        else:
-            # For simplicity, we just use the first matching result.
-            st.write("### Top Match Found:")
-            top_anime = results[0]
-            
-            title = top_anime['title'].get('english') or top_anime['title'].get('romaji')
-            
-            # Display image and details side by side
-            col_img, col_txt = st.columns([1, 4])
-            with col_img:
-                cover_url = top_anime.get('coverImage', {}).get('extraLarge') or top_anime.get('coverImage', {}).get('large')
-                if cover_url:
-                    st.image(cover_url, use_container_width=True)
-            
-            with col_txt:
-                st.subheader(f"{title} ({top_anime.get('seasonYear', 'N/A')})")
-                st.write(f"**Format:** {top_anime.get('format')} | **Episodes:** {top_anime.get('episodes')}")
-                st.write(f"**Global Avg Score:** {top_anime.get('averageScore', 'N/A')}/100")
-                if check_planning_status(username_input, top_anime['id']):
-                    st.warning("🟡 **Attenzione:** Hai già questo anime nella tua lista 'Plan to Watch' su AniList!")
-            
-            with st.spinner("Extracting features and running prediction..."):
-                # 1. Feature Engineering (1 row)
-                # Ensure parse dates match structure
+        # === 10 Recommendations ===
+        st.markdown("---")
+        st.subheader("🌟 Top 10 Raccomandazioni Personali")
+        if st.button("Genera Raccomandazioni tramite Modello ML", icon="✨"):
+            with st.spinner("Scarico i candidati ideali..."):
+                candidates = get_candidate_anime_for_recommendations(limit=500)
+                
+            with st.spinner("Inferendo i punteggi personalizzati..."):
+                cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
+                watched_ids = set()
+                if cache_path.exists():
+                    try:
+                        with open(cache_path, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                            for lst in data:
+                                status = lst.get('status')
+                                for entry in lst.get('entries', []):
+                                    m_id = entry.get('mediaId')
+                                    if m_id and status != 'PLANNING':
+                                        watched_ids.add(m_id)
+                    except: pass
+                
+                valid_candidates = [c for c in candidates if c['id'] not in watched_ids]
+                results_list = []
+                model = model_artifact['model']
+                train_columns = model_artifact['train_columns']
+                
                 if 'sort_date' not in user_history_df.columns:
                     user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
                     
-                X_infer = build_inference_features(top_anime, user_history_df, model_artifact['train_columns'])
+                total_cands = len(valid_candidates)
+                prog = st.progress(0)
+                for idx, cand in enumerate(valid_candidates):
+                    if idx % 10 == 0: prog.progress(max(0.01, min((idx + 1) / total_cands, 1.0)))
+                    try:
+                        X_infer = build_inference_features(cand, user_history_df, train_columns)
+                        pred = float(np.clip(model.predict(X_infer)[0], 0.0, 10.0))
+                        results_list.append((pred, cand))
+                    except: pass
+                prog.empty()
                 
-                # 2. Predict
-                model = model_artifact['model']
-                predicted_score = model.predict(X_infer)[0]
-                original_pred = predicted_score
-
-                # 3. Applicazione Euristica Umana (Regole Manuali per Casi Estremi)
-                try:
-                    adult_ratio = user_history_df['isAdult'].mean() if 'isAdult' in user_history_df.columns else 0
-                    is_target_adult = top_anime.get('isAdult', False)
-                    is_target_hentai = 'Hentai' in top_anime.get('genres', [])
-                    
-                    if (is_target_adult or is_target_hentai) and adult_ratio < 0.03:
-                        if is_target_hentai:
-                            predicted_score -= 3.0
-                            st.warning("⚠️ **Penalità Anti-Target (-3.0):** Contenuto esplicito (Hentai) fortemente penalizzato perché non presente quasi per nulla nel tuo storico.")
-                        else:
-                            predicted_score -= 2.0
-                            st.warning("⚠️ **Penalità Anti-Target (-2.0):** Contenuto categorizzato per Adulti (18+) o fortemente Ecchi spinto, penalizzato perché fuori dalla tua comfort-zone.")
-                except Exception as e:
-                    pass
-
-                predicted_score = float(np.clip(predicted_score, 0.0, 10.0))
+                results_list.sort(key=lambda x: x[0], reverse=True)
+                top_10 = results_list[:10]
                 
-            st.success(f"### Predicted Score for {username}: {predicted_score:.2f} / 10")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                hist_mean = user_history_df['user_score'].mean()
-                st.metric(label=f"{username}'s Historical Mean Score", value=f"{hist_mean:.2f}")
-            with col2:
-                glob_mean = (top_anime.get('averageScore') or 0) / 10.0
-                st.metric(label="Global Average Score", value=f"{glob_mean:.2f}")
+            for i, (pred, cand) in enumerate(top_10):
+                title = cand['title'].get('english') or cand['title'].get('romaji')
+                col_img, col_txt = st.columns([1, 6])
+                with col_img:
+                    st.image(cand.get('coverImage', {}).get('large') or "", use_container_width=True)
+                with col_txt:
+                    st.markdown(f"#### #{i+1} : {title} ⭐️ {pred:.2f} / 10")
+                    st.write(f"Global: {(cand.get('averageScore') or 0)/10:.1f} | Ep: {cand.get('episodes', 'N/A')} | Generi: {', '.join(cand.get('genres', []))}")
+                    st.markdown(f"[➡️ Apri su AniList](https://anilist.co/anime/{cand.get('id')})")
+                st.write("---")
 
-            # Transparency / Explainability block
-            st.markdown("---")
-            st.subheader("💡 Perché questo voto?")
-            st.markdown("Ecco i valori storici calcolati da zero (fino al momento precedente a questo anime) delle **caratteristiche che hanno pesato maggiormente** in questa singola scelta dell'A.I.:")
-            
-            top_feat_dict = model_artifact.get('feature_importance')
-            if top_feat_dict:
-                feature_translations = {
-                    'averageScore': 'Voto Globale del Pubblico',
-                    'popularity': 'Popolarità / Visualizzazioni',
-                    'duration': 'Durata Episodica in minuti',
-                    'episodes': 'Numero di Episodi',
-                    'hist_user_mean': 'Tua Media Voti Storica',
-                    'hist_user_std': 'Tua Deviazione (Volubilità Voti)',
-                    'recent_mean_score': 'Tuo Umore (Media Ultimi 10 Visti)',
-                    'hist_format_affinity': 'Tua Affinità a questo Formato',
-                    'hist_genre_affinity': 'Tua Affinità a questi Generi',
-                    'hist_genre_freq': 'Frequenza di Visione (% in questi Generi)',
-                    'hist_tag_affinity': 'Tua Affinità a queste Tematiche (Tag)',
-                    'hist_tag_freq': 'Frequenza di Visione (% con questi Tag)',
-                    'hist_studio_affinity': 'Tuo Storico Voti con questo Studio',
-                    'hist_studio_freq': 'Frequenza di Visione (% con questo Studio)',
-                    'hist_producer_affinity': 'Tuo Storico Voti con questi Produttori',
-                    'hist_producer_freq': 'Frequenza di Visione (% con questi Produttori)',
-                    'hist_franchise_count': 'Capitoli di questo Franchise visti in passato',
-                    'hist_franchise_mean': 'Tuo Voto Storico espresso su questo Franchise',
-                    'hist_char_count': 'Anime con Crossover di questi Personaggi',
-                    'hist_char_mean': 'Tuo Voto Storico ai Crossover di questi Personaggi',
-                    'hist_global_diff': 'Tuo Scarto dal Pubblico (Hater/Fanboy)',
-                    'hist_global_mae': 'Tua Imprevedibilità (Contrarian Score)',
-                    'favourites': 'Amore Globale (Favourites)',
-                    'isAdult': 'Contenuto per Adulti (18+)'
-                }
-
-                def t_feat(f):
-                    if f in feature_translations: return feature_translations[f]
-                    if f.startswith('genre_'): return f"Presenza Genere {f.replace('genre_', '')}"
-                    if f.startswith('tag_'): return f"Tema Centrale {f.replace('tag_', '')}"
-                    if f.startswith('format_'): return f"Formato Variante {f.replace('format_', '')}"
-                    if f.startswith('countryOfOrigin_'): return f"Paese di Origine {f.replace('countryOfOrigin_', '')}"
-                    return f
-                    
-                for x in top_feat_dict[:6]:
-                    c = x['Feature']
-                    imp = x['Importance'] * 100.0
-                    val = X_infer.iloc[0][c]
-                    
-                    if imp > 20: imp_msg = "Impatto Severo 🔥"
-                    elif imp > 10: imp_msg = "Molto Alto ⭐"
-                    elif imp > 5: imp_msg = "Rilevante 📈"
-                    else: imp_msg = "Sfumatura 🔹"
-                    
-                    # Convert log counts back
-                    if c in ['popularity', 'favourites'] and val > 0:
-                        val_num = int(np.expm1(val))
-                        form = f"{val_num:,} utenti".replace(',', '.')
-                    elif c.startswith('tag_') or c.startswith('genre_') or c.startswith('countryOfOrigin_') or c.endswith('_freq') or c == 'isAdult':
-                        if c.startswith('tag_') and val > 0.0:
-                            form = f"Allineato al {int(val*100)}%"
-                        elif c.endswith('_freq'):
-                            form = f"Rappresenta il {int(val*100)}% del totale"
-                        elif c.endswith('_count'):
-                            form = f"Ne avevi già visti {int(val)}"
-                        else:
-                            form = "Sì" if val > 0.0 else "No"
-                    elif isinstance(val, (float, np.floating)):
-                        form = f"{val:.3f}"
-                    else:
-                        form = str(val)
-                        
-                    # Perturbation test to find logical direction
-                    X_base = X_infer.copy()
-                    if c == 'averageScore':
-                        neutral = 7.0
-                    elif c.startswith('hist_') and (c.endswith('_freq') or c.endswith('_count')) or c == 'hist_user_std':
-                        neutral = 0.0
-                    elif c.startswith('hist_') or c == 'recent_mean_score':
-                        neutral = hist_mean
-                    elif c == 'popularity':
-                        neutral = float(np.log1p(1000))
-                    elif c == 'favourites':
-                        neutral = float(np.log1p(10))
-                    elif c == 'duration':
-                        neutral = 24.0
-                    else:
-                        neutral = 0.0
-                        
-                    X_base.iloc[0, X_base.columns.get_loc(c)] = neutral
-                    pred_without = model.predict(X_base)[0]
-                    impact = original_pred - pred_without
-                    
-                    if impact > 0.01:
-                        dir_icon = f"⬆️ Ha spinto il voto in SU di +{impact:.2f}"
-                    elif impact < -0.01:
-                        dir_icon = f"⬇️ Ha affossato il voto di {impact:.2f}"
-                    else:
-                        dir_icon = "⚖️ Impatto stabile bilanciato"
-                        
-                    st.write(f"- **{t_feat(c)}**: `{form}`  \n  > *(🧠 Peso decisorio: **{imp:.1f}%** | {dir_icon})*")
+        # === Predict Score For Specific Anime ===
+        st.subheader("🔍 Prevedi Voto (Ricerca Esatta)")
+        anime_query = st.text_input("Cerca un Anime (es. 'Attack on Titan'):")
+        
+        if anime_query:
+            with st.spinner("Ricerca in corso..."):
+                results = search_anime_by_title(anime_query)
+                
+            if not results:
+                st.warning("Nessun anime trovato.")
             else:
-                st.info("Le origini matematiche dettagliate per questo modello di classificazione non sono disponibili.")
-else:
-    st.info("Please enter a username and train models on their history in the sidebar first.")
+                options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')}) - Formato: {r.get('format')}": r for r in results}
+                selected_option = st.selectbox("Seleziona l'anime esatto:", list(options.keys()))
+                
+                if st.button("Calcola Score Predetto"):
+                    top_anime = options[selected_option]
+                    title = top_anime['title'].get('english') or top_anime['title'].get('romaji')
+                    
+                    if 'sort_date' not in user_history_df.columns:
+                        user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
+                        
+                    X_infer = build_inference_features(top_anime, user_history_df, model_artifact['train_columns'])
+                    model = model_artifact['model']
+                    predicted_score = float(np.clip(model.predict(X_infer)[0], 0.0, 10.0))
+                    
+                    st.success(f"### Voto Stimato per {title}: {predicted_score:.2f} / 10")
+                    
+                    col_img, col_txt = st.columns([1, 4])
+                    with col_img:
+                        st.image(top_anime.get('coverImage', {}).get('large') or "", use_container_width=True)
+                    with col_txt:
+                        hist_mean = user_history_df['user_score'].mean()
+                        glob_mean = (top_anime.get('averageScore') or 0) / 10.0
+                        st.write(f"**Tua Media:** {hist_mean:.2f} | **Media Globale:** {glob_mean:.2f}")
+                        if check_planning_status(username, top_anime['id']):
+                            st.warning("E' già in 'Plan to Watch' su AniList!")
+                            
+    else:
+        st.info("Inserisci uno username valido a sinistra e traina i modelli per proseguire!")
+
+elif mode == "Nuovo Utente (Cold Start)":
     
+    st.header("🛸 Onboarding: Trova il tuo Anime perfetto!")
+    st.write("Rispondi a poche domande per creare un profilo temporaneo e ottenere raccomandazioni su misura.")
+    
+    if st.session_state["cs_profile"] is None:
+        
+        if st.session_state["cs_step"] == 1:
+            st.subheader("Step 1: Dimmi 3-5 anime che ti hanno 'Stregato'")
+            st.write("Cerca gli anime e clicca su Aggiungi.")
+            search_q = st.text_input("Cerca anime:")
+            if search_q:
+                res = search_anime_by_title(search_q)
+                if res:
+                    opts = {f"{r['title'].get('english') or r['title'].get('romaji')}": r for r in res}
+                    sel = st.selectbox("Risultati:", list(opts.keys()))
+                    if st.button("➕ Aggiungi a Preferiti"):
+                        anime_obj = opts[sel]
+                        if not any(a['id'] == anime_obj['id'] for a in st.session_state["cs_favorites"]):
+                            st.session_state["cs_favorites"].append(anime_obj)
+                            st.success(f"{sel} aggiunto!")
+                        else:
+                            st.warning("Hai già inserito questo anime!")
+                            
+            if st.session_state["cs_favorites"]:
+                st.markdown("---")
+                st.write("**I tuoi Preferiti Finora:**")
+                for fa in st.session_state["cs_favorites"]:
+                    st.write(f"- ⭐️ {fa['title'].get('english') or fa['title'].get('romaji')}")
+                    
+                if len(st.session_state["cs_favorites"]) >= 3:
+                    if st.button("Prosegui allo Step Finale ➡️"):
+                        st.session_state["cs_step"] = 2
+                        st.rerun()
+                else:
+                    st.info(f"Mancano {3 - len(st.session_state['cs_favorites'])} anime per sbloccare lo step successivo.")
+                        
+        elif st.session_state["cs_step"] == 2:
+            st.subheader("Step 2: Ulteriori Preferenze")
+            
+            with st.form("cold_start_form"):
+                fav_g = st.multiselect("Generi Preferiti:", GENRES_LIST)
+                avoid_g = st.multiselect("Generi da Evitare ASSOLUTAMENTE:", GENRES_LIST)
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    pref_fmt = st.selectbox("Formato Preferito:", FORMATS_LIST, index=len(FORMATS_LIST)-1)
+                with col2:
+                    pref_len = st.selectbox("Lunghezza Ideale:", LENGTHS_LIST, index=len(LENGTHS_LIST)-1)
+                with col3:
+                    pref_era = st.selectbox("Epoca Favorita:", ERAS_LIST, index=len(ERAS_LIST)-1)
+                    
+                submit = st.form_submit_button("🚀 Genera Profilo A.I. Magico")
+                
+                if submit:
+                    profile = build_cold_start_profile(
+                        st.session_state["cs_favorites"], fav_g, avoid_g, pref_fmt, pref_len, pref_era
+                    )
+                    st.session_state["cs_profile"] = profile
+                    st.success("Profilo Generato! Preparati per le raccomandazioni...")
+                    st.rerun()
+                    
+    else:
+        # We have a CS Profile!
+        st.success("Profilo di partenza caricato correttamente!")
+        if st.button("🔁 Rifai Onboarding"):
+            st.session_state["cs_profile"] = None
+            st.session_state["cs_favorites"] = []
+            st.session_state["cs_step"] = 1
+            st.rerun()
+            
+        profile = st.session_state["cs_profile"]
+        
+        # Recommendations
+        st.markdown("---")
+        st.header("🎯 Top 10 Consigliati per Te")
+        
+        if "cs_recommendations" not in st.session_state:
+            with st.spinner("Calcolo le raccomandazioni logiche basate sui tuoi input..."):
+                cands = get_candidate_anime_for_recommendations(limit=500)
+                # Togli quelli gia preferiti originariamente
+                fav_ids = {a['id'] for a in st.session_state["cs_favorites"]}
+                cands = [c for c in cands if c['id'] not in fav_ids]
+                
+                recs = generate_cold_start_recommendations(profile, cands)
+                st.session_state["cs_recommendations"] = recs
+                
+        for i, (pred, cand) in enumerate(st.session_state["cs_recommendations"]):
+            title = cand['title'].get('english') or cand['title'].get('romaji')
+            col_img, col_txt = st.columns([1, 6])
+            with col_img:
+                st.image(cand.get('coverImage', {}).get('large') or "", use_container_width=True)
+            with col_txt:
+                st.markdown(f"#### #{i+1} : {title}")
+                st.markdown(f"**Affinità Stimata**: 🚀 `{pred:.2f} / 10`")
+                st.write(f"Anno: {cand.get('seasonYear')} | Ep: {cand.get('episodes')} | Generi: {', '.join(cand.get('genres', []))}")
+                
+            st.write("---")
+            
+        # Prediction
+        st.markdown("---")
+        st.subheader("🔮 Calcola Affinità Singola")
+        anime_query = st.text_input("Quale anime hai in mente? Inseriscilo qui:")
+        
+        if anime_query:
+            with st.spinner("Ricerca..."):
+                results = search_anime_by_title(anime_query)
+            if not results:
+                st.warning("Non trovato.")
+            else:
+                options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')})": r for r in results}
+                selected_option = st.selectbox("Seleziona la tua scelta:", list(options.keys()), key="cs_sel")
+                
+                if st.button("Dimmi l'Affinità"):
+                    top_anime = options[selected_option]
+                    score, explanations = content_based_heuristic_scorer(top_anime, profile)
+                    
+                    st.success(f"### Score Stimato: {score:.2f} / 10")
+                    colImg, colTxt = st.columns([1, 4])
+                    with colImg:
+                         st.image(top_anime.get('coverImage', {}).get('large') or "", use_container_width=True)
+                    with colTxt:
+                        st.subheader("💡 Perché?")
+                        for expl in explanations:
+                            st.write(expl)
