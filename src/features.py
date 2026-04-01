@@ -41,7 +41,8 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         'studio_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'producer_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'format_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
-        'diff_from_global': {'sum': 0.0, 'abs_sum': 0.0, 'count': 0} # Regular dict
+        'diff_from_global': {'sum': 0.0, 'abs_sum': 0.0, 'count': 0}, # Regular dict
+        'scores_by_id': {}
     }
     
     historical_features = []
@@ -113,6 +114,16 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         user_global_diff = state['diff_from_global']['sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
         user_global_mae = state['diff_from_global']['abs_sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
         
+        def calc_related_mean(id_str_list):
+            if pd.isna(id_str_list) or not str(id_str_list).strip(): return 0, np.nan
+            ids = [int(x) for x in str(id_str_list).split(',')] 
+            match_scores = [state['scores_by_id'][i] for i in ids if i in state['scores_by_id']]
+            if not match_scores: return 0, np.nan
+            return len(match_scores), np.mean(match_scores)
+
+        hist_franchise_count, hist_franchise_mean = calc_related_mean(row.get('related_ids'))
+        hist_char_count, hist_char_mean = calc_related_mean(row.get('char_related_ids'))
+        
         historical_features.append({
             'hist_user_mean': user_mean,
             'hist_user_std': hist_user_std,
@@ -127,6 +138,10 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             'hist_studio_freq': hist_studio_freq,
             'hist_producer_affinity': producer_affinity,
             'hist_producer_freq': hist_producer_freq,
+            'hist_franchise_count': hist_franchise_count,
+            'hist_franchise_mean': hist_franchise_mean,
+            'hist_char_count': hist_char_count,
+            'hist_char_mean': hist_char_mean,
             'hist_global_diff': user_global_diff,
             'hist_global_mae': user_global_mae
         })
@@ -136,6 +151,8 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         state['sum_scores'] += score
         state['scores_list'].append(score)
         state['count'] += 1
+        if pd.notna(row.get('mediaId')):
+            state['scores_by_id'][int(row['mediaId'])] = score
         
         if pd.notna(fmt):
             state['format_scores'][fmt]['sum'] += score
@@ -189,7 +206,9 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # e.g., if genre_affinity is NaN, fallback to user_mean, then to global fixed mean (e.g., 5.0)
     df['hist_user_mean'] = df['hist_user_mean'].fillna(df['user_score'].mean() if len(df) > 0 else 5.0)
     df['recent_mean_score'] = df['recent_mean_score'].fillna(df['hist_user_mean'])
-    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity']:
+    df['hist_franchise_count'] = df['hist_franchise_count'].fillna(0)
+    df['hist_char_count'] = df['hist_char_count'].fillna(0)
+    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_franchise_mean', 'hist_char_mean']:
         df[col] = df[col].fillna(df['hist_user_mean'])
         
     # Standard Anime Numeric Features
@@ -197,13 +216,21 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df['duration'] = df['duration'].fillna(df['duration'].median() if not df['duration'].isna().all() else 24.0)
     df['seasonYear'] = df['seasonYear'].fillna(df['seasonYear'].median() if not df['seasonYear'].isna().all() else 2015.0)
     
+    # Anime unreleased might have 0 as averageScore, which devastates the model.
+    df['averageScore'] = df['averageScore'].replace(0, np.nan)
     avg_score_median = df['averageScore'].median() if not df['averageScore'].isna().all() else 70.0
     df['averageScore'] = df['averageScore'].fillna(avg_score_median) / 10.0 # scale 0-10
     
     pop_median = df['popularity'].median() if not df['popularity'].isna().all() else 1000.0
+    if 'media_status' in df.columns:
+        unreleased_mask = df['media_status'] == 'NOT_YET_RELEASED'
+        df.loc[unreleased_mask, 'popularity'] = np.nan
     df['popularity'] = np.log1p(df['popularity'].fillna(pop_median)) # Log transform for heavy skew
     
     fav_median = df['favourites'].median() if not df['favourites'].isna().all() else 10.0
+    if 'media_status' in df.columns:
+        unreleased_mask = df['media_status'] == 'NOT_YET_RELEASED'
+        df.loc[unreleased_mask, 'favourites'] = np.nan
     df['favourites'] = np.log1p(df['favourites'].fillna(fav_median))
     
     df['isAdult'] = df['isAdult'].fillna(0).astype(int)
@@ -234,7 +261,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # Combine Base, Numerical, Historical, and Categorical
     num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', 'isAdult']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
-                 'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_global_diff', 'hist_global_mae']
+                 'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
     X = pd.concat([df[num_cols + hist_cols], df_cat], axis=1)
     y = df['user_score']
@@ -283,8 +310,25 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
         t_rank = t.get('rank', 0)
         tags_str_list.append(f"{t_name}={t_rank}")
     
+    relations_data = anime_data_dict.get('relations', {}).get('edges', [])
+    related_ids = []
+    char_related_ids = []
+    valid_types = ['ADAPTATION', 'PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'ALTERNATIVE', 'SPIN_OFF', 'OTHER', 'SOURCE', 'COMPILATION', 'CONTAINS']
+    for edge in relations_data:
+        node_id = edge.get('node', {}).get('id')
+        if not node_id: continue
+        r_type = edge.get('relationType')
+        if r_type == 'CHARACTER':
+            char_related_ids.append(str(node_id))
+        elif r_type in valid_types or r_type:
+            related_ids.append(str(node_id))
+            
     row = {
         'user_score': np.nan, # Unknown target
+        'mediaId': anime_data_dict.get('id'),
+        'media_status': anime_data_dict.get('status'),
+        'related_ids': ",".join(related_ids),
+        'char_related_ids': ",".join(char_related_ids),
         'format': anime_data_dict.get('format'),
         'episodes': anime_data_dict.get('episodes'),
         'duration': anime_data_dict.get('duration'),

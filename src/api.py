@@ -52,6 +52,14 @@ query ($userName: String, $chunk: Int) {
             rank
             category
           }
+          relations {
+            edges {
+              relationType
+              node {
+                id
+              }
+            }
+          }
           studios {
             edges {
               isMain
@@ -93,6 +101,14 @@ query ($search: String) {
       coverImage {
         extraLarge
         large
+      }
+      relations {
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
       }
       studios {
         edges {

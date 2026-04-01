@@ -59,6 +59,19 @@ def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: b
                 t_rank = t.get('rank', 0)
                 tags_str_list.append(f"{t_name}={t_rank}")
             
+            relations_data = media.get('relations', {}).get('edges', [])
+            related_ids = []
+            char_related_ids = []
+            valid_types = ['ADAPTATION', 'PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'ALTERNATIVE', 'SPIN_OFF', 'OTHER', 'SOURCE', 'COMPILATION', 'CONTAINS']
+            for edge in relations_data:
+                node_id = edge.get('node', {}).get('id')
+                if not node_id: continue
+                r_type = edge.get('relationType')
+                if r_type == 'CHARACTER':
+                    char_related_ids.append(str(node_id))
+                elif r_type in valid_types or r_type:
+                    related_ids.append(str(node_id))
+            
             # Get best title
             title_dict = media.get('title', {})
             title = title_dict.get('english') or title_dict.get('romaji') or str(media.get('id'))
@@ -91,6 +104,8 @@ def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: b
                 'media_status': media.get('status'),
                 'genres': ", ".join(media.get('genres', [])),
                 'tags': ", ".join(tags_str_list),
+                'related_ids': ",".join(related_ids),
+                'char_related_ids': ",".join(char_related_ids),
                 'studios': studio_str,
                 'producers': producer_str
             }

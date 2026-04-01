@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import json
 import sys
 from pathlib import Path
 
@@ -14,6 +15,25 @@ from src.models import train_and_evaluate_all_models
 from src.models import MODELS_DIR
 from src.dataset import DATA_DIR
 import joblib
+
+import logging
+logger = logging.getLogger(__name__)
+
+def check_planning_status(username, media_id):
+    from pathlib import Path
+    cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
+    if cache_path.exists():
+        try:
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                for lst in data:
+                    if lst.get('status') == 'PLANNING':
+                        for entry in lst.get('entries', []):
+                            if entry.get('mediaId') == media_id:
+                                return True
+        except:
+            pass
+    return False
 
 st.set_page_config(page_title="AniList ML Predictor", layout="wide")
 
@@ -95,6 +115,8 @@ if st.session_state["model_trained"]:
                 st.subheader(f"{title} ({top_anime.get('seasonYear', 'N/A')})")
                 st.write(f"**Format:** {top_anime.get('format')} | **Episodes:** {top_anime.get('episodes')}")
                 st.write(f"**Global Avg Score:** {top_anime.get('averageScore', 'N/A')}/100")
+                if check_planning_status(username_input, top_anime['id']):
+                    st.warning("🟡 **Attenzione:** Hai già questo anime nella tua lista 'Plan to Watch' su AniList!")
             
             with st.spinner("Extracting features and running prediction..."):
                 # 1. Feature Engineering (1 row)
@@ -161,6 +183,10 @@ if st.session_state["model_trained"]:
                     'hist_studio_freq': 'Frequenza di Visione (% con questo Studio)',
                     'hist_producer_affinity': 'Tuo Storico Voti con questi Produttori',
                     'hist_producer_freq': 'Frequenza di Visione (% con questi Produttori)',
+                    'hist_franchise_count': 'Capitoli di questo Franchise visti in passato',
+                    'hist_franchise_mean': 'Tuo Voto Storico espresso su questo Franchise',
+                    'hist_char_count': 'Anime con Crossover di questi Personaggi',
+                    'hist_char_mean': 'Tuo Voto Storico ai Crossover di questi Personaggi',
                     'hist_global_diff': 'Tuo Scarto dal Pubblico (Hater/Fanboy)',
                     'hist_global_mae': 'Tua Imprevedibilità (Contrarian Score)',
                     'favourites': 'Amore Globale (Favourites)',
@@ -194,6 +220,8 @@ if st.session_state["model_trained"]:
                             form = f"Allineato al {int(val*100)}%"
                         elif c.endswith('_freq'):
                             form = f"Rappresenta il {int(val*100)}% del totale"
+                        elif c.endswith('_count'):
+                            form = f"Ne avevi già visti {int(val)}"
                         else:
                             form = "Sì" if val > 0.0 else "No"
                     elif isinstance(val, (float, np.floating)):
@@ -205,7 +233,7 @@ if st.session_state["model_trained"]:
                     X_base = X_infer.copy()
                     if c == 'averageScore':
                         neutral = 7.0
-                    elif c.startswith('hist_') and c.endswith('_freq') or c == 'hist_user_std':
+                    elif c.startswith('hist_') and (c.endswith('_freq') or c.endswith('_count')) or c == 'hist_user_std':
                         neutral = 0.0
                     elif c.startswith('hist_') or c == 'recent_mean_score':
                         neutral = hist_mean
