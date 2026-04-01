@@ -3,7 +3,7 @@ import numpy as np
 # Static Genre Definitions
 GENRES_LIST = [
     "Action", "Adventure", "Comedy", "Drama", "Ecchi", 
-    "Fantasy", "Horror", "Mahou Shoujo", "Mecha", "Music", 
+    "Fantasy", "Hentai", "Horror", "Mahou Shoujo", "Mecha", "Music", 
     "Mystery", "Psychological", "Romance", "Sci-Fi", 
     "Slice of Life", "Sports", "Supernatural", "Thriller"
 ]
@@ -233,14 +233,17 @@ def generate_cold_start_recommendations(profile, candidates_list):
     """
     results = []
     
-    # Exclude logic for avoided genres
     avoided_genres = set(profile['explicit']['avoided_genres'])
+    pref_format = profile['explicit']['preferred_format']
     
     for cand in candidates_list:
-        # Hard filter out highly conflicting genres to ensure clean top 10
         cand_genres = set(cand.get('genres', []))
         if avoided_genres.intersection(cand_genres):
-            continue # Hard Ignore
+            continue
+        
+        # Hard filter format: if user picked a specific format, exclude mismatches
+        if pref_format != "ANY" and cand.get('format') and cand.get('format') != pref_format:
+            continue
             
         score, _ = content_based_heuristic_scorer(cand, profile)
         results.append((score, cand))
@@ -427,11 +430,17 @@ def generate_manga_cold_start_recommendations(profile, candidates_list):
     """Score manga candidates and return top 10."""
     results = []
     avoided_genres = set(profile['explicit']['avoided_genres'])
+    pref_format = profile['explicit']['preferred_format']
     
     for cand in candidates_list:
         cand_genres = set(cand.get('genres', []))
         if avoided_genres.intersection(cand_genres):
             continue
+        
+        # Hard filter format
+        if pref_format != "ANY" and cand.get('format') and cand.get('format') != pref_format:
+            continue
+        
         score, _ = content_based_heuristic_scorer_manga(cand, profile)
         results.append((score, cand))
         

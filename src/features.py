@@ -254,9 +254,15 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     
     df['isAdult'] = df['isAdult'].fillna(0).astype(int)
     
+    # New features: source material, completion ratio, rewatch count
+    df['source'] = df['source'].fillna('UNKNOWN')
+    df['progress'] = df['progress'].fillna(0)
+    df['completion_ratio'] = (df['progress'] / df['episodes'].replace(0, np.nan)).fillna(1.0).clip(0, 1)
+    df['repeat'] = df['repeat'].fillna(0).astype(int)
+    
     # Anime Categorical (One-Hot / Multi-Hot)
     # 1. Base Dummies
-    categorical_cols = ['format', 'countryOfOrigin']
+    categorical_cols = ['format', 'countryOfOrigin', 'source']
     df_cat = pd.get_dummies(df[categorical_cols], dummy_na=True, drop_first=False)
     
     # 2. All Genres Multi-Hot
@@ -278,7 +284,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine Base, Numerical, Historical, and Categorical
-    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', 'isAdult']
+    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
                  'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
@@ -372,6 +378,9 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
         'tags': ", ".join(tags_str_list),
         'studios': studio_str,
         'producers': producer_str,
+        'progress': anime_data_dict.get('episodes') or 0,
+        'repeat': 0,
+        'source': anime_data_dict.get('source', 'UNKNOWN'),
         'creators': creator_str,
         'sort_date': pd.Timestamp('2100-01-01') # Put firmly at the absolute end of history
     }
@@ -453,6 +462,11 @@ def engineer_manga_features(df: pd.DataFrame):
     
     df['isAdult'] = df['isAdult'].fillna(0).astype(int)
     
+    # New features: completion ratio, rewatch count
+    df['progress'] = df['progress'].fillna(0)
+    df['completion_ratio'] = (df['progress'] / df['chapters'].replace(0, np.nan)).fillna(1.0).clip(0, 1)
+    df['repeat'] = df['repeat'].fillna(0).astype(int)
+    
     # Categorical (One-Hot / Multi-Hot)
     categorical_cols = ['format', 'countryOfOrigin']
     df_cat = pd.get_dummies(df[categorical_cols], dummy_na=True, drop_first=False)
@@ -474,7 +488,7 @@ def engineer_manga_features(df: pd.DataFrame):
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine
-    num_cols = ['chapters', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult']
+    num_cols = ['chapters', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
                  'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
@@ -536,6 +550,8 @@ def build_manga_inference_features(manga_data_dict, user_history_df, train_colum
         'genres': ", ".join(manga_data_dict.get('genres', [])),
         'tags': ", ".join(tags_str_list),
         'authors': author_str,
+        'progress': manga_data_dict.get('chapters') or 0,
+        'repeat': 0,
         'sort_date': pd.Timestamp('2100-01-01')
     }
     

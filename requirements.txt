@@ -5,3 +5,8 @@ streamlit
 numpy
 matplotlib
 seaborn
+xgboost
+lightgbm
+optuna
+shap
+plotly

@@ -11,6 +11,15 @@ logger = logging.getLogger(__name__)
 CACHE_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+CACHE_TTL_HOURS = 24
+
+def _is_cache_valid(cache_path, ttl_hours=CACHE_TTL_HOURS):
+    """Check if a cache file exists and is younger than ttl_hours."""
+    if not cache_path.exists():
+        return False
+    age_seconds = time.time() - cache_path.stat().st_mtime
+    return age_seconds < ttl_hours * 3600
+
 API_URL = "https://graphql.anilist.co"
 
 # We request in point 10 decimal format
@@ -376,7 +385,7 @@ def fetch_user_anime_list(username: str, force_refresh: bool = False):
     """
     cache_path = CACHE_DIR / f"user_list_{username.lower()}.json"
     
-    if not force_refresh and cache_path.exists():
+    if not force_refresh and _is_cache_valid(cache_path):
         logger.info(f"Loading cached anime list for {username}")
         with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -466,7 +475,7 @@ def get_candidate_anime_for_recommendations(limit: int = 500):
 
 def fetch_user_manga_list(username: str, force_refresh: bool = False):
     cache_path = CACHE_DIR / f"user_manga_list_{username.lower()}.json"
-    if not force_refresh and cache_path.exists():
+    if not force_refresh and _is_cache_valid(cache_path):
         logger.info(f"Loading cached manga list for {username}")
         with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
