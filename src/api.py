@@ -121,6 +121,54 @@ query ($search: String) {
 }
 """
 
+ANIME_CANDIDATES_QUERY = """
+query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+  Page(page: $page, perPage: $perPage) {
+    media(type: ANIME, sort: $sort) {
+      id
+      title { romaji english }
+      format
+      episodes
+      duration
+      season
+      seasonYear
+      averageScore
+      meanScore
+      favourites
+      isAdult
+      popularity
+      countryOfOrigin
+      source
+      status
+      genres
+      tags {
+        name
+        rank
+        category
+      }
+      coverImage {
+        extraLarge
+        large
+      }
+      relations {
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
+      }
+      studios {
+        edges {
+          isMain
+          node { name }
+        }
+      }
+    }
+  }
+}
+"""
+
 def fetch_with_retry(query, variables, retries=3):
     """Fetch from AniList GraphQL with basic exponential backoff retry logic."""
     for attempt in range(retries):
@@ -220,6 +268,37 @@ def search_anime_by_title(title: str):
     logger.info(f"Searching for anime: {title}")
     data = fetch_with_retry(ANIME_SEARCH_QUERY, variables)
     return data.get("Page", {}).get("media", [])
+
+def get_candidate_anime_for_recommendations(limit: int = 500):
+    """
+    Fetch top anime by popularity and top anime by score to serve as candidates.
+    Returns a unique list of media dictionaries.
+    """
+    limit_per_category = limit // 2
+    per_page = 50
+    pages_per_category = max(1, limit_per_category // per_page)
+    
+    unique_candidates = {}
+    
+    logger.info("Fetching most popular anime candidates...")
+    for p in range(1, pages_per_category + 1):
+        vars_pop = {"page": p, "perPage": per_page, "sort": ["POPULARITY_DESC"]}
+        data = fetch_with_retry(ANIME_CANDIDATES_QUERY, vars_pop)
+        media_list = data.get("Page", {}).get("media", [])
+        for m in media_list:
+            if m: unique_candidates[m['id']] = m
+        time.sleep(1) # Polite delay
+        
+    logger.info("Fetching highest rated anime candidates...")
+    for p in range(1, pages_per_category + 1):
+        vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
+        data = fetch_with_retry(ANIME_CANDIDATES_QUERY, vars_score)
+        media_list = data.get("Page", {}).get("media", [])
+        for m in media_list:
+            if m: unique_candidates[m['id']] = m
+        time.sleep(1) # Polite delay
+        
+    return list(unique_candidates.values())
 
 if __name__ == "__main__":
     # Test script locally

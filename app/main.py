@@ -8,7 +8,7 @@ from pathlib import Path
 # Add project root to sys path to allow importing src
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.api import search_anime_by_title
+from src.api import search_anime_by_title, get_candidate_anime_for_recommendations
 from src.dataset import build_user_dataframe
 from src.features import build_inference_features
 from src.models import train_and_evaluate_all_models
@@ -88,7 +88,94 @@ if st.session_state["model_trained"]:
             st.write("**Top Feature Importances:**")
             st.bar_chart(pd.DataFrame(model_artifact['feature_importance']).set_index('Feature'))
 
-    # Anime Search Input
+    # === NEW SECTION: Top 10 Recommendations ===
+    st.markdown("---")
+    st.subheader("🌟 Top 10 Raccomandazioni (Non Visti)")
+    st.markdown("Scopri gli anime che ti piaceranno di più! Verranno analizzati i 500 anime più popolari e apprezzati, scartati quelli che hai già visto e valutati i restanti usando il tuo modello personalizzato.")
+    if st.button("Genera Top 10 Raccomandazioni", icon="✨"):
+        with st.spinner("Scarico i 500 anime candidati..."):
+            candidates = get_candidate_anime_for_recommendations(limit=500)
+            
+        with st.spinner("Controllo la tua lista ed estraggo le features (potrebbe richiedere un minuto)..."):
+            # Get watched list
+            from pathlib import Path
+            cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
+            watched_ids = set()
+            if cache_path.exists():
+                try:
+                    with open(cache_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        for lst in data:
+                            status = lst.get('status')
+                            for entry in lst.get('entries', []):
+                                m_id = entry.get('mediaId')
+                                if m_id and status != 'PLANNING':
+                                    watched_ids.add(m_id)
+                except:
+                    pass
+            
+            # Filter candidates (ignore if already in watched_ids)
+            valid_candidates = [c for c in candidates if c['id'] not in watched_ids]
+            
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            results_list = []
+            
+            model = model_artifact['model']
+            train_columns = model_artifact['train_columns']
+            
+            # Ensure sort date exists
+            if 'sort_date' not in user_history_df.columns:
+                user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
+                
+            total_cands = len(valid_candidates)
+            for idx, cand in enumerate(valid_candidates):
+                if idx % 5 == 0 or idx == total_cands - 1:
+                    progress_bar.progress((idx + 1) / total_cands)
+                    status_text.text(f"Analizzando anime {idx+1} di {total_cands}...")
+                
+                try:
+                    X_infer = build_inference_features(cand, user_history_df, train_columns)
+                    pred = model.predict(X_infer)[0]
+                    # Same logic for adult/hentai penalty from previous heuristic
+                    adult_ratio = user_history_df['isAdult'].mean() if 'isAdult' in user_history_df.columns else 0
+                    is_target_adult = cand.get('isAdult', False)
+                    is_target_hentai = 'Hentai' in cand.get('genres', [])
+                    
+                    if (is_target_adult or is_target_hentai) and adult_ratio < 0.03:
+                        if is_target_hentai: pred -= 3.0
+                        else: pred -= 2.0
+                        
+                    pred = float(np.clip(pred, 0.0, 10.0))
+                    results_list.append((pred, cand))
+                except Exception as e:
+                    pass
+                    
+            progress_bar.empty()
+            status_text.empty()
+            
+            results_list.sort(key=lambda x: x[0], reverse=True)
+            top_10 = results_list[:10]
+            
+        st.success("Analisi Completata! Ecco i 10 anime che ti piaceranno di più:")
+        
+        for i, (pred, cand) in enumerate(top_10):
+            title = cand['title'].get('english') or cand['title'].get('romaji')
+            col_img, col_txt = st.columns([1, 4])
+            with col_img:
+                cover_url = cand.get('coverImage', {}).get('large')
+                if cover_url:
+                    st.image(cover_url, use_container_width=True)
+            with col_txt:
+                st.markdown(f"#### #{i+1} - {title}")
+                st.write(f"**Score Previsto dal Modello:** {pred:.2f} / 10")
+                st.write(f"**Punteggio Globale:** {(cand.get('averageScore') or 0)/10:.2f} | **Episodi:** {cand.get('episodes', 'N/A')} | **Anno:** {cand.get('seasonYear', 'N/A')}")
+                st.write(f"**Generi:** {', '.join(cand.get('genres', []))}")
+                anilist_url = f"https://anilist.co/anime/{cand.get('id')}"
+                st.markdown(f"[➡️ Apri su AniList]({anilist_url})")
+            st.markdown("---")
+
+    st.subheader("🔍 Predict Score for a Specific Anime")
     anime_query = st.text_input("Enter Anime Title (e.g., 'Frieren', 'Attack on Titan'):")
     
     if anime_query and st.button("Search & Predict"):
