@@ -8,25 +8,30 @@ from pathlib import Path
 # Add project root to sys path to allow importing src
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from src.api import search_anime_by_title, get_candidate_anime_for_recommendations
-from src.dataset import build_user_dataframe
-from src.features import build_inference_features
-from src.models import train_and_evaluate_all_models
+from src.api import search_anime_by_title, get_candidate_anime_for_recommendations, search_manga_by_title, get_candidate_manga_for_recommendations
+from src.dataset import build_user_dataframe, build_user_manga_dataframe
+from src.features import build_inference_features, build_manga_inference_features
+from src.models import train_and_evaluate_all_models, train_and_evaluate_all_manga_models
 from src.models import MODELS_DIR
 from src.dataset import DATA_DIR
 from src.cold_start import (
     build_cold_start_profile, 
     content_based_heuristic_scorer, 
     generate_cold_start_recommendations,
-    GENRES_LIST, FORMATS_LIST, LENGTHS_LIST, ERAS_LIST
+    GENRES_LIST, FORMATS_LIST, LENGTHS_LIST, ERAS_LIST,
+    build_manga_cold_start_profile,
+    content_based_heuristic_scorer_manga,
+    generate_manga_cold_start_recommendations,
+    MANGA_FORMATS_LIST, MANGA_LENGTHS_LIST
 )
 import joblib
 
 import logging
 logger = logging.getLogger(__name__)
 
-def check_planning_status(username, media_id):
-    cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
+def check_planning_status(username, media_id, media_type="anime"):
+    prefix = "user_list_" if media_type == "anime" else "user_manga_list_"
+    cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/{prefix}{username.lower()}.json")
     if cache_path.exists():
         try:
             with open(cache_path, 'r', encoding='utf-8') as f:
@@ -41,44 +46,76 @@ def check_planning_status(username, media_id):
     return False
 
 def init_session_state():
-    if "username" not in st.session_state: st.session_state["username"] = ""
-    if "model_trained" not in st.session_state: st.session_state["model_trained"] = False
-    if "cs_favorites" not in st.session_state: st.session_state["cs_favorites"] = []
-    if "cs_profile" not in st.session_state: st.session_state["cs_profile"] = None
-    if "cs_step" not in st.session_state: st.session_state["cs_step"] = 1
-    if "recommendation_feedback" not in st.session_state: st.session_state["recommendation_feedback"] = {}
+    defaults = {
+        "username": "",
+        # Anime
+        "model_trained_anime": False,
+        "cs_favorites_anime": [],
+        "cs_profile_anime": None,
+        "cs_step_anime": 1,
+        # Manga
+        "model_trained_manga": False,
+        "cs_favorites_manga": [],
+        "cs_profile_manga": None,
+        "cs_step_manga": 1,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 st.set_page_config(page_title="AniList ML Predictor", layout="wide", page_icon="🎬")
 init_session_state()
 
-st.title("🎬 AniList User Score Predictor")
-st.markdown("Scopri quali anime adorerai, basandoti sul tuo storico o su un rapido onboarding!")
+st.title("🎬 AniList Score Predictor")
+st.markdown("Scopri quali anime e manga adorerai, basandoti sul tuo storico o su un rapido onboarding!")
+
+# ========== TOP-LEVEL MEDIA TOGGLE ==========
+media_type = st.sidebar.radio("📌 Tipo di Media:", ["🎬 Anime", "📖 Manga"])
+is_manga = "Manga" in media_type
 
 mode = st.sidebar.radio("Scegli Modalità:", ["Profilo AniList (Machine Learning)", "Nuovo Utente (Cold Start)"])
 
+# ==========================================
+# PROFILO ANILIST (ML) MODE
+# ==========================================
 if mode == "Profilo AniList (Machine Learning)":
-    # Sidebar for Setup & Training
     with st.sidebar:
         st.header("1. Setup User Profile")
         username_input = st.text_input("Enter AniList Username:", value=st.session_state.get("username", "arsid"))
-        if st.button("Fetch Data & Train Models"):
-            with st.spinner(f"Fetching data and training models for {username_input}... This might take a minute."):
+        
+        model_trained_key = "model_trained_manga" if is_manga else "model_trained_anime"
+        btn_label = "Fetch Manga & Train" if is_manga else "Fetch Anime & Train"
+        
+        if st.button(btn_label):
+            media_label = "manga" if is_manga else "anime"
+            with st.spinner(f"Fetching {media_label} data and training models for {username_input}..."):
                 st.session_state["username"] = username_input
-                result = train_and_evaluate_all_models(username_input)
+                if is_manga:
+                    result = train_and_evaluate_all_manga_models(username_input)
+                else:
+                    result = train_and_evaluate_all_models(username_input)
+                    
                 if isinstance(result, dict) and result.get("status") == "error":
                     st.error(result["message"])
-                    st.session_state["model_trained"] = False
+                    st.session_state[model_trained_key] = False
                 else:
                     st.success("Models trained successfully!")
-                    st.session_state["model_trained"] = True
+                    st.session_state[model_trained_key] = True
 
-    # Main block for prediction
-    if st.session_state["model_trained"]:
-        st.header(f"2. Dashboard per {st.session_state['username']}")
+    model_trained_key = "model_trained_manga" if is_manga else "model_trained_anime"
+    
+    if st.session_state[model_trained_key]:
+        media_label = "Manga" if is_manga else "Anime"
+        st.header(f"2. Dashboard {media_label} per {st.session_state['username']}")
         
         username = st.session_state["username"]
-        model_path = MODELS_DIR / f"{username}_best_model.pkl"
-        csv_path = DATA_DIR / f"{username}_clean.csv"
+        
+        if is_manga:
+            model_path = MODELS_DIR / f"{username}_manga_best_model.pkl"
+            csv_path = DATA_DIR / f"{username}_manga_clean.csv"
+        else:
+            model_path = MODELS_DIR / f"{username}_best_model.pkl"
+            csv_path = DATA_DIR / f"{username}_clean.csv"
         
         try:
             model_artifact = joblib.load(model_path)
@@ -99,13 +136,18 @@ if mode == "Profilo AniList (Machine Learning)":
 
         # === 10 Recommendations ===
         st.markdown("---")
-        st.subheader("🌟 Top 10 Raccomandazioni Personali")
-        if st.button("Genera Raccomandazioni tramite Modello ML", icon="✨"):
+        st.subheader(f"🌟 Top 10 Raccomandazioni {media_label} Personali")
+        rec_btn_label = f"Genera Raccomandazioni {media_label} tramite ML"
+        if st.button(rec_btn_label, icon="✨"):
             with st.spinner("Scarico i candidati ideali..."):
-                candidates = get_candidate_anime_for_recommendations(limit=500)
+                if is_manga:
+                    candidates = get_candidate_manga_for_recommendations(limit=500)
+                else:
+                    candidates = get_candidate_anime_for_recommendations(limit=500)
                 
             with st.spinner("Inferendo i punteggi personalizzati..."):
-                cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/user_list_{username.lower()}.json")
+                cache_prefix = "user_manga_list_" if is_manga else "user_list_"
+                cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/{cache_prefix}{username.lower()}.json")
                 watched_ids = set()
                 if cache_path.exists():
                     try:
@@ -132,7 +174,10 @@ if mode == "Profilo AniList (Machine Learning)":
                 for idx, cand in enumerate(valid_candidates):
                     if idx % 10 == 0: prog.progress(max(0.01, min((idx + 1) / total_cands, 1.0)))
                     try:
-                        X_infer = build_inference_features(cand, user_history_df, train_columns)
+                        if is_manga:
+                            X_infer = build_manga_inference_features(cand, user_history_df, train_columns)
+                        else:
+                            X_infer = build_inference_features(cand, user_history_df, train_columns)
                         pred = float(np.clip(model.predict(X_infer)[0], 0.0, 10.0))
                         results_list.append((pred, cand))
                     except: pass
@@ -148,32 +193,55 @@ if mode == "Profilo AniList (Machine Learning)":
                     st.image(cand.get('coverImage', {}).get('large') or "", use_container_width=True)
                 with col_txt:
                     st.markdown(f"#### #{i+1} : {title} ⭐️ {pred:.2f} / 10")
-                    st.write(f"Global: {(cand.get('averageScore') or 0)/10:.1f} | Ep: {cand.get('episodes', 'N/A')} | Generi: {', '.join(cand.get('genres', []))}")
-                    st.markdown(f"[➡️ Apri su AniList](https://anilist.co/anime/{cand.get('id')})")
+                    if is_manga:
+                        start_date = cand.get('startDate', {}) or {}
+                        year = start_date.get('year', 'N/A') if isinstance(start_date, dict) else 'N/A'
+                        st.write(f"Global: {(cand.get('averageScore') or 0)/10:.1f} | Cap: {cand.get('chapters', 'N/A')} | Generi: {', '.join(cand.get('genres', []))}")
+                        st.markdown(f"[➡️ Apri su AniList](https://anilist.co/manga/{cand.get('id')})")
+                    else:
+                        st.write(f"Global: {(cand.get('averageScore') or 0)/10:.1f} | Ep: {cand.get('episodes', 'N/A')} | Generi: {', '.join(cand.get('genres', []))}")
+                        st.markdown(f"[➡️ Apri su AniList](https://anilist.co/anime/{cand.get('id')})")
                 st.write("---")
 
-        # === Predict Score For Specific Anime ===
-        st.subheader("🔍 Prevedi Voto (Ricerca Esatta)")
-        anime_query = st.text_input("Cerca un Anime (es. 'Attack on Titan'):")
+        # === Predict Score For Specific Media ===
+        st.subheader(f"🔍 Prevedi Voto {media_label} (Ricerca Esatta)")
+        query_label = "Cerca un Manga:" if is_manga else "Cerca un Anime (es. 'Attack on Titan'):"
+        media_query = st.text_input(query_label)
         
-        if anime_query:
+        if media_query:
             with st.spinner("Ricerca in corso..."):
-                results = search_anime_by_title(anime_query)
+                if is_manga:
+                    results = search_manga_by_title(media_query)
+                else:
+                    results = search_anime_by_title(media_query)
                 
             if not results:
-                st.warning("Nessun anime trovato.")
+                st.warning(f"Nessun {media_label.lower()} trovato.")
             else:
-                options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')}) - Formato: {r.get('format')}": r for r in results}
-                selected_option = st.selectbox("Seleziona l'anime esatto:", list(options.keys()))
+                if is_manga:
+                    start_dates = {}
+                    options = {}
+                    for r in results:
+                        sd = r.get('startDate', {}) or {}
+                        yr = sd.get('year', 'N/A') if isinstance(sd, dict) else 'N/A'
+                        label = f"{r['title'].get('english') or r['title'].get('romaji')} ({yr}) - Formato: {r.get('format')}"
+                        options[label] = r
+                else:
+                    options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')}) - Formato: {r.get('format')}": r for r in results}
+                    
+                selected_option = st.selectbox(f"Seleziona il {media_label.lower()} esatto:", list(options.keys()))
                 
                 if st.button("Calcola Score Predetto"):
-                    top_anime = options[selected_option]
-                    title = top_anime['title'].get('english') or top_anime['title'].get('romaji')
+                    top_media = options[selected_option]
+                    title = top_media['title'].get('english') or top_media['title'].get('romaji')
                     
                     if 'sort_date' not in user_history_df.columns:
                         user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
                         
-                    X_infer = build_inference_features(top_anime, user_history_df, model_artifact['train_columns'])
+                    if is_manga:
+                        X_infer = build_manga_inference_features(top_media, user_history_df, model_artifact['train_columns'])
+                    else:
+                        X_infer = build_inference_features(top_media, user_history_df, model_artifact['train_columns'])
                     model = model_artifact['model']
                     predicted_score = float(np.clip(model.predict(X_infer)[0], 0.0, 10.0))
                     
@@ -181,55 +249,71 @@ if mode == "Profilo AniList (Machine Learning)":
                     
                     col_img, col_txt = st.columns([1, 4])
                     with col_img:
-                        st.image(top_anime.get('coverImage', {}).get('large') or "", use_container_width=True)
+                        st.image(top_media.get('coverImage', {}).get('large') or "", use_container_width=True)
                     with col_txt:
                         hist_mean = user_history_df['user_score'].mean()
-                        glob_mean = (top_anime.get('averageScore') or 0) / 10.0
+                        glob_mean = (top_media.get('averageScore') or 0) / 10.0
                         st.write(f"**Tua Media:** {hist_mean:.2f} | **Media Globale:** {glob_mean:.2f}")
-                        if check_planning_status(username, top_anime['id']):
-                            st.warning("E' già in 'Plan to Watch' su AniList!")
+                        mt = "manga" if is_manga else "anime"
+                        if check_planning_status(username, top_media['id'], mt):
+                            st.warning("E' già in 'Plan to Read/Watch' su AniList!")
                             
     else:
         st.info("Inserisci uno username valido a sinistra e traina i modelli per proseguire!")
 
+# ==========================================
+# COLD START MODE
+# ==========================================
 elif mode == "Nuovo Utente (Cold Start)":
     
-    st.header("🛸 Onboarding: Trova il tuo Anime perfetto!")
-    st.write("Rispondi a poche domande per creare un profilo temporaneo e ottenere raccomandazioni su misura.")
+    media_label = "Manga" if is_manga else "Anime"
+    icon = "📖" if is_manga else "🛸"
     
-    if st.session_state["cs_profile"] is None:
+    st.header(f"{icon} Onboarding: Trova il tuo {media_label} perfetto!")
+    st.write(f"Rispondi a poche domande per creare un profilo temporaneo e ottenere raccomandazioni {media_label.lower()} su misura.")
+    
+    # Session state keys
+    fav_key = "cs_favorites_manga" if is_manga else "cs_favorites_anime"
+    profile_key = "cs_profile_manga" if is_manga else "cs_profile_anime"
+    step_key = "cs_step_manga" if is_manga else "cs_step_anime"
+    rec_key = "cs_recommendations_manga" if is_manga else "cs_recommendations"
+    
+    if st.session_state[profile_key] is None:
         
-        if st.session_state["cs_step"] == 1:
-            st.subheader("Step 1: Dimmi 3-5 anime che ti hanno 'Stregato'")
-            st.write("Cerca gli anime e clicca su Aggiungi.")
-            search_q = st.text_input("Cerca anime:")
+        if st.session_state[step_key] == 1:
+            st.subheader(f"Step 1: Dimmi 3-5 {media_label.lower()} che ti hanno 'Stregato'")
+            st.write(f"Cerca {media_label.lower()} e clicca su Aggiungi.")
+            search_q = st.text_input(f"Cerca {media_label.lower()}:")
             if search_q:
-                res = search_anime_by_title(search_q)
+                if is_manga:
+                    res = search_manga_by_title(search_q)
+                else:
+                    res = search_anime_by_title(search_q)
                 if res:
                     opts = {f"{r['title'].get('english') or r['title'].get('romaji')}": r for r in res}
                     sel = st.selectbox("Risultati:", list(opts.keys()))
                     if st.button("➕ Aggiungi a Preferiti"):
-                        anime_obj = opts[sel]
-                        if not any(a['id'] == anime_obj['id'] for a in st.session_state["cs_favorites"]):
-                            st.session_state["cs_favorites"].append(anime_obj)
+                        media_obj = opts[sel]
+                        if not any(a['id'] == media_obj['id'] for a in st.session_state[fav_key]):
+                            st.session_state[fav_key].append(media_obj)
                             st.success(f"{sel} aggiunto!")
                         else:
-                            st.warning("Hai già inserito questo anime!")
+                            st.warning(f"Hai già inserito questo {media_label.lower()}!")
                             
-            if st.session_state["cs_favorites"]:
+            if st.session_state[fav_key]:
                 st.markdown("---")
                 st.write("**I tuoi Preferiti Finora:**")
-                for fa in st.session_state["cs_favorites"]:
+                for fa in st.session_state[fav_key]:
                     st.write(f"- ⭐️ {fa['title'].get('english') or fa['title'].get('romaji')}")
                     
-                if len(st.session_state["cs_favorites"]) >= 3:
+                if len(st.session_state[fav_key]) >= 3:
                     if st.button("Prosegui allo Step Finale ➡️"):
-                        st.session_state["cs_step"] = 2
+                        st.session_state[step_key] = 2
                         st.rerun()
                 else:
-                    st.info(f"Mancano {3 - len(st.session_state['cs_favorites'])} anime per sbloccare lo step successivo.")
+                    st.info(f"Mancano {3 - len(st.session_state[fav_key])} {media_label.lower()} per sbloccare lo step successivo.")
                         
-        elif st.session_state["cs_step"] == 2:
+        elif st.session_state[step_key] == 2:
             st.subheader("Step 2: Ulteriori Preferenze")
             
             with st.form("cold_start_form"):
@@ -237,20 +321,34 @@ elif mode == "Nuovo Utente (Cold Start)":
                 avoid_g = st.multiselect("Generi da Evitare ASSOLUTAMENTE:", GENRES_LIST)
                 
                 col1, col2, col3 = st.columns(3)
-                with col1:
-                    pref_fmt = st.selectbox("Formato Preferito:", FORMATS_LIST, index=len(FORMATS_LIST)-1)
-                with col2:
-                    pref_len = st.selectbox("Lunghezza Ideale:", LENGTHS_LIST, index=len(LENGTHS_LIST)-1)
-                with col3:
-                    pref_era = st.selectbox("Epoca Favorita:", ERAS_LIST, index=len(ERAS_LIST)-1)
+                
+                if is_manga:
+                    with col1:
+                        pref_fmt = st.selectbox("Formato Preferito:", MANGA_FORMATS_LIST, index=len(MANGA_FORMATS_LIST)-1)
+                    with col2:
+                        pref_len = st.selectbox("Lunghezza Ideale (Capitoli):", MANGA_LENGTHS_LIST, index=len(MANGA_LENGTHS_LIST)-1)
+                    with col3:
+                        pref_era = st.selectbox("Epoca Favorita:", ERAS_LIST, index=len(ERAS_LIST)-1)
+                else:
+                    with col1:
+                        pref_fmt = st.selectbox("Formato Preferito:", FORMATS_LIST, index=len(FORMATS_LIST)-1)
+                    with col2:
+                        pref_len = st.selectbox("Lunghezza Ideale:", LENGTHS_LIST, index=len(LENGTHS_LIST)-1)
+                    with col3:
+                        pref_era = st.selectbox("Epoca Favorita:", ERAS_LIST, index=len(ERAS_LIST)-1)
                     
-                submit = st.form_submit_button("🚀 Genera Profilo A.I. Magico")
+                submit = st.form_submit_button(f"🚀 Genera Profilo {media_label} A.I. Magico")
                 
                 if submit:
-                    profile = build_cold_start_profile(
-                        st.session_state["cs_favorites"], fav_g, avoid_g, pref_fmt, pref_len, pref_era
-                    )
-                    st.session_state["cs_profile"] = profile
+                    if is_manga:
+                        profile = build_manga_cold_start_profile(
+                            st.session_state[fav_key], fav_g, avoid_g, pref_fmt, pref_len, pref_era
+                        )
+                    else:
+                        profile = build_cold_start_profile(
+                            st.session_state[fav_key], fav_g, avoid_g, pref_fmt, pref_len, pref_era
+                        )
+                    st.session_state[profile_key] = profile
                     st.success("Profilo Generato! Preparati per le raccomandazioni...")
                     st.rerun()
                     
@@ -258,28 +356,36 @@ elif mode == "Nuovo Utente (Cold Start)":
         # We have a CS Profile!
         st.success("Profilo di partenza caricato correttamente!")
         if st.button("🔁 Rifai Onboarding"):
-            st.session_state["cs_profile"] = None
-            st.session_state["cs_favorites"] = []
-            st.session_state["cs_step"] = 1
+            st.session_state[profile_key] = None
+            st.session_state[fav_key] = []
+            st.session_state[step_key] = 1
+            if rec_key in st.session_state:
+                del st.session_state[rec_key]
             st.rerun()
             
-        profile = st.session_state["cs_profile"]
+        profile = st.session_state[profile_key]
         
         # Recommendations
         st.markdown("---")
-        st.header("🎯 Top 10 Consigliati per Te")
+        st.header(f"🎯 Top 10 {media_label} Consigliati per Te")
         
-        if "cs_recommendations" not in st.session_state:
-            with st.spinner("Calcolo le raccomandazioni logiche basate sui tuoi input..."):
-                cands = get_candidate_anime_for_recommendations(limit=500)
-                # Togli quelli gia preferiti originariamente
-                fav_ids = {a['id'] for a in st.session_state["cs_favorites"]}
+        if rec_key not in st.session_state:
+            with st.spinner(f"Calcolo le raccomandazioni {media_label.lower()} basate sui tuoi input..."):
+                if is_manga:
+                    cands = get_candidate_manga_for_recommendations(limit=500)
+                else:
+                    cands = get_candidate_anime_for_recommendations(limit=500)
+                    
+                fav_ids = {a['id'] for a in st.session_state[fav_key]}
                 cands = [c for c in cands if c['id'] not in fav_ids]
                 
-                recs = generate_cold_start_recommendations(profile, cands)
-                st.session_state["cs_recommendations"] = recs
+                if is_manga:
+                    recs = generate_manga_cold_start_recommendations(profile, cands)
+                else:
+                    recs = generate_cold_start_recommendations(profile, cands)
+                st.session_state[rec_key] = recs
                 
-        for i, (pred, cand) in enumerate(st.session_state["cs_recommendations"]):
+        for i, (pred, cand) in enumerate(st.session_state[rec_key]):
             title = cand['title'].get('english') or cand['title'].get('romaji')
             col_img, col_txt = st.columns([1, 6])
             with col_img:
@@ -287,32 +393,53 @@ elif mode == "Nuovo Utente (Cold Start)":
             with col_txt:
                 st.markdown(f"#### #{i+1} : {title}")
                 st.markdown(f"**Affinità Stimata**: 🚀 `{pred:.2f} / 10`")
-                st.write(f"Anno: {cand.get('seasonYear')} | Ep: {cand.get('episodes')} | Generi: {', '.join(cand.get('genres', []))}")
+                if is_manga:
+                    start_date = cand.get('startDate', {}) or {}
+                    year = start_date.get('year', 'N/A') if isinstance(start_date, dict) else 'N/A'
+                    st.write(f"Anno: {year} | Cap: {cand.get('chapters', 'N/A')} | Generi: {', '.join(cand.get('genres', []))}")
+                else:
+                    st.write(f"Anno: {cand.get('seasonYear')} | Ep: {cand.get('episodes')} | Generi: {', '.join(cand.get('genres', []))}")
                 
             st.write("---")
             
         # Prediction
         st.markdown("---")
-        st.subheader("🔮 Calcola Affinità Singola")
-        anime_query = st.text_input("Quale anime hai in mente? Inseriscilo qui:")
+        st.subheader(f"🔮 Calcola Affinità Singola ({media_label})")
+        query_label = f"Quale {media_label.lower()} hai in mente? Inseriscilo qui:"
+        media_query = st.text_input(query_label)
         
-        if anime_query:
+        if media_query:
             with st.spinner("Ricerca..."):
-                results = search_anime_by_title(anime_query)
+                if is_manga:
+                    results = search_manga_by_title(media_query)
+                else:
+                    results = search_anime_by_title(media_query)
             if not results:
                 st.warning("Non trovato.")
             else:
-                options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')})": r for r in results}
+                if is_manga:
+                    options = {}
+                    for r in results:
+                        sd = r.get('startDate', {}) or {}
+                        yr = sd.get('year', 'N/A') if isinstance(sd, dict) else 'N/A'
+                        label = f"{r['title'].get('english') or r['title'].get('romaji')} ({yr})"
+                        options[label] = r
+                else:
+                    options = {f"{r['title'].get('english') or r['title'].get('romaji')} ({r.get('seasonYear', 'N/A')})": r for r in results}
+                    
                 selected_option = st.selectbox("Seleziona la tua scelta:", list(options.keys()), key="cs_sel")
                 
                 if st.button("Dimmi l'Affinità"):
-                    top_anime = options[selected_option]
-                    score, explanations = content_based_heuristic_scorer(top_anime, profile)
+                    top_media = options[selected_option]
+                    if is_manga:
+                        score, explanations = content_based_heuristic_scorer_manga(top_media, profile)
+                    else:
+                        score, explanations = content_based_heuristic_scorer(top_media, profile)
                     
                     st.success(f"### Score Stimato: {score:.2f} / 10")
                     colImg, colTxt = st.columns([1, 4])
                     with colImg:
-                         st.image(top_anime.get('coverImage', {}).get('large') or "", use_container_width=True)
+                         st.image(top_media.get('coverImage', {}).get('large') or "", use_container_width=True)
                     with colTxt:
                         st.subheader("💡 Perché?")
                         for expl in explanations:

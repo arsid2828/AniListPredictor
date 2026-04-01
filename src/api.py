@@ -66,6 +66,12 @@ query ($userName: String, $chunk: Int) {
               node { name }
             }
           }
+          staff {
+            edges {
+              role
+              node { name { full } }
+            }
+          }
         }
       }
     }
@@ -116,6 +122,12 @@ query ($search: String) {
           node { name }
         }
       }
+      staff {
+        edges {
+          role
+          node { name { full } }
+        }
+      }
     }
   }
 }
@@ -162,6 +174,158 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
         edges {
           isMain
           node { name }
+        }
+      }
+      staff {
+        edges {
+          role
+          node { name { full } }
+        }
+      }
+    }
+  }
+}
+"""
+
+USER_MANGA_LIST_QUERY = """
+query ($userName: String, $chunk: Int) {
+  MediaListCollection(userName: $userName, type: MANGA, chunk: $chunk) {
+    hasNextChunk
+    lists {
+      name
+      status
+      entries {
+        mediaId
+        status
+        score(format: POINT_10_DECIMAL)
+        progress
+        repeat
+        startedAt { year month day }
+        completedAt { year month day }
+        updatedAt
+        media {
+          id
+          title { romaji english }
+          format
+          chapters
+          startDate { year }
+          averageScore
+          meanScore
+          favourites
+          isAdult
+          popularity
+          countryOfOrigin
+          status
+          genres
+          tags {
+            name
+            rank
+            category
+          }
+          relations {
+            edges {
+              relationType
+              node {
+                id
+              }
+            }
+          }
+          staff {
+            edges {
+              role
+              node { name { full } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+MANGA_SEARCH_QUERY = """
+query ($search: String) {
+  Page(page: 1, perPage: 10) {
+    media(search: $search, type: MANGA, sort: SEARCH_MATCH) {
+      id
+      title { romaji english }
+      format
+      chapters
+      startDate { year }
+      averageScore
+      meanScore
+      favourites
+      isAdult
+      popularity
+      countryOfOrigin
+      status
+      genres
+      tags {
+        name
+        rank
+        category
+      }
+      coverImage {
+        extraLarge
+        large
+      }
+      relations {
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
+      }
+      staff {
+        edges {
+          role
+          node { name { full } }
+        }
+      }
+    }
+  }
+}
+"""
+
+MANGA_CANDIDATES_QUERY = """
+query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+  Page(page: $page, perPage: $perPage) {
+    media(type: MANGA, sort: $sort) {
+      id
+      title { romaji english }
+      format
+      chapters
+      startDate { year }
+      averageScore
+      meanScore
+      favourites
+      isAdult
+      popularity
+      countryOfOrigin
+      status
+      genres
+      tags {
+        name
+        rank
+        category
+      }
+      coverImage {
+        extraLarge
+        large
+      }
+      relations {
+        edges {
+          relationType
+          node {
+            id
+          }
+        }
+      }
+      staff {
+        edges {
+          role
+          node { name { full } }
         }
       }
     }
@@ -297,6 +461,80 @@ def get_candidate_anime_for_recommendations(limit: int = 500):
         for m in media_list:
             if m: unique_candidates[m['id']] = m
         time.sleep(1) # Polite delay
+        
+    return list(unique_candidates.values())
+
+def fetch_user_manga_list(username: str, force_refresh: bool = False):
+    cache_path = CACHE_DIR / f"user_manga_list_{username.lower()}.json"
+    if not force_refresh and cache_path.exists():
+        logger.info(f"Loading cached manga list for {username}")
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+            
+    logger.info(f"Fetching manga list for user: {username}")
+    all_lists = {}
+    chunk = 1
+    has_next_chunk = True
+    
+    while has_next_chunk:
+        variables = {"userName": username, "chunk": chunk}
+        logger.info(f"Requesting manga chunk {chunk}...")
+        try:
+            data = fetch_with_retry(USER_MANGA_LIST_QUERY, variables)
+        except ValueError as e:
+            if "User not found" in str(e) or "private" in str(e).lower():
+                logger.error(f"Cannot fetch manga data for {username}: Profile might be private or non-existent.")
+                return None
+            raise
+            
+        collection = data.get("MediaListCollection", {})
+        if not collection: break
+            
+        lists = collection.get("lists", [])
+        for lst in lists:
+            name = lst.get("name")
+            if name not in all_lists:
+                all_lists[name] = {"name": name, "status": lst.get("status"), "entries": []}
+            all_lists[name]["entries"].extend(lst.get("entries", []))
+            
+        has_next_chunk = collection.get("hasNextChunk", False)
+        chunk += 1
+        time.sleep(1)
+        
+    unified_data = list(all_lists.values())
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(unified_data, f, ensure_ascii=False, indent=2)
+        
+    return unified_data
+
+def search_manga_by_title(title: str):
+    variables = {"search": title}
+    logger.info(f"Searching for manga: {title}")
+    data = fetch_with_retry(MANGA_SEARCH_QUERY, variables)
+    return data.get("Page", {}).get("media", [])
+
+def get_candidate_manga_for_recommendations(limit: int = 500):
+    limit_per_category = limit // 2
+    per_page = 50
+    pages_per_category = max(1, limit_per_category // per_page)
+    
+    unique_candidates = {}
+    
+    logger.info("Fetching most popular manga candidates...")
+    for p in range(1, pages_per_category + 1):
+        vars_pop = {"page": p, "perPage": per_page, "sort": ["POPULARITY_DESC"]}
+        data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_pop)
+        for m in data.get("Page", {}).get("media", []):
+            if m: unique_candidates[m['id']] = m
+        time.sleep(1)
+        
+    logger.info("Fetching highest rated manga candidates...")
+    for p in range(1, pages_per_category + 1):
+        vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
+        data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_score)
+        for m in data.get("Page", {}).get("media", []):
+            if m: unique_candidates[m['id']] = m
+        time.sleep(1)
         
     return list(unique_candidates.values())
 

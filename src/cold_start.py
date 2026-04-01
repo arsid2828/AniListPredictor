@@ -247,3 +247,194 @@ def generate_cold_start_recommendations(profile, candidates_list):
         
     results.sort(key=lambda x: x[0], reverse=True)
     return results[:10]
+
+# ============================
+# MANGA COLD START
+# ============================
+
+MANGA_FORMATS_LIST = ["MANGA", "LIGHT_NOVEL", "ONE_SHOT", "ANY"]
+MANGA_LENGTHS_LIST = ["BREVE (<20 cap)", "MEDIO (20-100 cap)", "LUNGO (100+ cap)", "ANY"]
+
+def build_manga_cold_start_profile(favorite_manga_list, preferred_genres, avoided_genres, preferred_format, preferred_length, preferred_era):
+    """Builds a mock user profile for manga cold start."""
+    profile = {
+        "explicit": {
+            "preferred_genres": preferred_genres or [],
+            "avoided_genres": avoided_genres or [],
+            "preferred_format": preferred_format,
+            "preferred_length": preferred_length,
+            "preferred_era": preferred_era
+        },
+        "implicit": {
+            "genres_weight": {},
+            "tags_weight": {},
+            "format_weight": {},
+            "avg_score_mean": 7.0,
+            "popularity_mean": 0
+        }
+    }
+    
+    if not favorite_manga_list:
+        return profile
+        
+    num_favorites = len(favorite_manga_list)
+    genre_counts = {}
+    tag_counts = {}
+    format_counts = {}
+    total_avg_score = 0
+    total_popularity = 0
+    
+    for manga in favorite_manga_list:
+        for g in manga.get('genres', []):
+            genre_counts[g] = genre_counts.get(g, 0) + 1
+            
+        for t in manga.get('tags', []):
+            t_name = t.get('name')
+            t_rank = t.get('rank', 50)
+            if t_rank > 60:
+                tag_counts[t_name] = tag_counts.get(t_name, 0) + (t_rank / 100.0)
+                
+        fmt = manga.get('format')
+        if fmt:
+            format_counts[fmt] = format_counts.get(fmt, 0) + 1
+            
+        total_avg_score += (manga.get('averageScore') or 70) / 10.0
+        total_popularity += (manga.get('popularity') or 0)
+        
+    for g, count in genre_counts.items():
+        profile["implicit"]["genres_weight"][g] = count / num_favorites
+    for t, weight in tag_counts.items():
+        profile["implicit"]["tags_weight"][t] = weight / num_favorites
+    for f, count in format_counts.items():
+        profile["implicit"]["format_weight"][f] = count / num_favorites
+        
+    profile["implicit"]["avg_score_mean"] = total_avg_score / num_favorites
+    profile["implicit"]["popularity_mean"] = total_popularity / num_favorites
+    
+    return profile
+
+def check_manga_length_match(candidate_chapters, pref_length):
+    if pref_length == "ANY" or not candidate_chapters:
+        return "ANY", 0.0
+        
+    chaps = int(candidate_chapters)
+    
+    if "BREVE" in pref_length:
+        if chaps < 20: return "MATCH", 1.0
+        elif chaps <= 100: return "MISMATCH_1", 0.0
+        else: return "MISMATCH_2", -0.5
+    elif "MEDIO" in pref_length:
+        if 20 <= chaps <= 100: return "MATCH", 1.0
+        elif chaps < 20: return "MISMATCH_1", 0.0
+        elif chaps <= 200: return "MISMATCH_1", 0.0
+        else: return "MISMATCH_2", -0.5
+    elif "LUNGO" in pref_length:
+        if chaps > 100: return "MATCH", 1.0
+        elif 20 <= chaps <= 100: return "MISMATCH_1", 0.0
+        else: return "MISMATCH_2", -1.0
+        
+    return "ANY", 0.0
+
+def content_based_heuristic_scorer_manga(candidate, profile):
+    """Returns a predicted score (0-10) and explanations for a manga candidate."""
+    base_score = 5.0
+    score = base_score
+    explanations = []
+    
+    cand_genres = set(candidate.get('genres', []))
+    cand_tags = {t['name']: t.get('rank', 50) for t in candidate.get('tags', [])}
+    cand_format = candidate.get('format')
+    cand_chapters = candidate.get('chapters')
+    start_date = candidate.get('startDate', {}) or {}
+    cand_year = start_date.get('year') if isinstance(start_date, dict) else None
+    cand_avg_score = (candidate.get('averageScore') or 70) / 10.0
+    
+    # 1. EXPLICIT PREFERENCES
+    avoided_match = set(profile['explicit']['avoided_genres']).intersection(cand_genres)
+    if avoided_match:
+        penalty = len(avoided_match) * 2.5
+        score -= penalty
+        explanations.append(f"❌ Fortemente sconsigliato (-{penalty}): Contiene generi che eviti ({', '.join(avoided_match)}).")
+        
+    pref_match = set(profile['explicit']['preferred_genres']).intersection(cand_genres)
+    if pref_match:
+        bonus = len(pref_match) * 1.0
+        score += bonus
+        explanations.append(f"✅ Ottimo Match Generi (+{bonus}): Contiene i tuoi generi preferiti ({', '.join(pref_match)}).")
+        
+    pref_format = profile['explicit']['preferred_format']
+    if pref_format != "ANY":
+        if cand_format == pref_format:
+            score += 0.8
+            explanations.append(f"📖 Formato Preferito (+0.8): È un {pref_format}.")
+        elif cand_format:
+            score -= 0.5
+            explanations.append(f"⚠️ Formato Diverso (-0.5): Hai preferito {pref_format}, ma questo è {cand_format}.")
+            
+    pref_length = profile['explicit']['preferred_length']
+    l_status, l_bonus = check_manga_length_match(cand_chapters, pref_length)
+    if l_status == "MATCH":
+        score += 0.5
+        explanations.append(f"📏 Lunghezza Ideale (+0.5): In linea con le tue preferenze sul numero di capitoli.")
+    elif l_status == "MISMATCH_2":
+        score += l_bonus
+        explanations.append(f"📏 Lunghezza Sgradita ({l_bonus}): Troppi o troppo pochi capitoli per i tuoi gusti.")
+        
+    pref_era = profile['explicit']['preferred_era']
+    era_bonus = check_era_match(cand_year, pref_era)
+    if era_bonus > 0:
+        score += 0.5
+        explanations.append(f"📅 Epoca Preferita (+0.5): Pubblicato nel periodo storico che preferisci ({cand_year}).")
+    elif era_bonus < 0:
+        score += era_bonus
+        explanations.append(f"🕰️ Epoca Diversa ({era_bonus}): Pubblicato in un periodo diverso da quello cercato.")
+
+    # 2. IMPLICIT PREFERENCES
+    implicit_genre_score = 0.0
+    for g in cand_genres:
+        if g not in profile['explicit']['preferred_genres']:
+            implicit_genre_score += profile['implicit']['genres_weight'].get(g, 0.0) * 0.5
+    if implicit_genre_score > 0:
+        implicit_genre_score = min(implicit_genre_score, 1.5)
+        score += implicit_genre_score
+        explanations.append(f"🔍 Tracce Simili (+{implicit_genre_score:.2f}): Ha generi in comune con i tuoi manga preferiti.")
+        
+    implicit_tag_score = 0.0
+    matched_tags = []
+    for t_name, t_rank in cand_tags.items():
+        if t_name in profile['implicit']['tags_weight']:
+            weight = profile['implicit']['tags_weight'][t_name] * (t_rank / 100.0)
+            implicit_tag_score += weight
+            matched_tags.append(t_name)
+    if implicit_tag_score > 0.3:
+        implicit_tag_score = min(implicit_tag_score, 2.0)
+        score += implicit_tag_score
+        top_matched = ", ".join(matched_tags[:3])
+        explanations.append(f"🎭 Tematiche Affini (+{implicit_tag_score:.2f}): Condivide tematiche forti con i tuoi preferiti (es. {top_matched}).")
+        
+    global_diff = cand_avg_score - 7.0
+    global_bonus = global_diff * 0.3
+    score += global_bonus
+    if global_bonus > 0.3:
+        explanations.append(f"🏆 Apprezzato dalla Critica (+{global_bonus:.2f}): L'alta qualità globale lo rende una scommessa sicura.")
+    elif global_bonus < -0.3:
+        explanations.append(f"📉 Basso Gradimento Globale ({global_bonus:.2f}): La community lo reputa un titolo mediocre.")
+        
+    final_score = float(np.clip(score, 0.0, 10.0))
+    return final_score, explanations
+
+def generate_manga_cold_start_recommendations(profile, candidates_list):
+    """Score manga candidates and return top 10."""
+    results = []
+    avoided_genres = set(profile['explicit']['avoided_genres'])
+    
+    for cand in candidates_list:
+        cand_genres = set(cand.get('genres', []))
+        if avoided_genres.intersection(cand_genres):
+            continue
+        score, _ = content_based_heuristic_scorer_manga(cand, profile)
+        results.append((score, cand))
+        
+    results.sort(key=lambda x: x[0], reverse=True)
+    return results[:10]
+

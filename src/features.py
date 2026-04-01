@@ -40,6 +40,7 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         'tag_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'studio_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'producer_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
+        'creator_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'format_scores': defaultdict(lambda: {'sum': 0.0, 'count': 0}),
         'diff_from_global': {'sum': 0.0, 'abs_sum': 0.0, 'count': 0}, # Regular dict
         'scores_by_id': {}
@@ -110,6 +111,18 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
         producer_affinity = np.mean(producer_means) if len(producer_means) > 0 else np.nan
         hist_producer_freq = np.mean(producer_counts) if len(producer_counts) > 0 else 0.0
         
+        # Creator affinity and freq
+        creators = _get_list(row.get('creators', ''))
+        creator_means = []
+        creator_counts = []
+        for c in creators:
+            if state['creator_scores'][c]['count'] > 0:
+                creator_means.append(state['creator_scores'][c]['sum'] / state['creator_scores'][c]['count'])
+            if state['count'] > 0:
+                creator_counts.append(state['creator_scores'][c]['count'] / state['count'])
+        creator_affinity = np.mean(creator_means) if len(creator_means) > 0 else np.nan
+        hist_creator_freq = np.mean(creator_counts) if len(creator_counts) > 0 else 0.0
+        
         # Global critic alignment (does user usually rate higher or lower than MAL/AniList global?)
         user_global_diff = state['diff_from_global']['sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
         user_global_mae = state['diff_from_global']['abs_sum'] / state['diff_from_global']['count'] if state['diff_from_global']['count'] > 0 else 0.0
@@ -138,6 +151,8 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             'hist_studio_freq': hist_studio_freq,
             'hist_producer_affinity': producer_affinity,
             'hist_producer_freq': hist_producer_freq,
+            'hist_creator_affinity': creator_affinity,
+            'hist_creator_freq': hist_creator_freq,
             'hist_franchise_count': hist_franchise_count,
             'hist_franchise_mean': hist_franchise_mean,
             'hist_char_count': hist_char_count,
@@ -174,6 +189,10 @@ def create_historical_features(df: pd.DataFrame) -> pd.DataFrame:
             state['producer_scores'][p]['sum'] += score
             state['producer_scores'][p]['count'] += 1
             
+        for c in creators:
+            state['creator_scores'][c]['sum'] += score
+            state['creator_scores'][c]['count'] += 1
+            
         global_score = row['averageScore']
         if pd.notna(global_score) and global_score > 0:
             # AniList global score is 0-100, scale to 0-10
@@ -208,7 +227,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     df['recent_mean_score'] = df['recent_mean_score'].fillna(df['hist_user_mean'])
     df['hist_franchise_count'] = df['hist_franchise_count'].fillna(0)
     df['hist_char_count'] = df['hist_char_count'].fillna(0)
-    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_franchise_mean', 'hist_char_mean']:
+    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_creator_affinity', 'hist_franchise_mean', 'hist_char_mean']:
         df[col] = df[col].fillna(df['hist_user_mean'])
         
     # Standard Anime Numeric Features
@@ -261,7 +280,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     # Combine Base, Numerical, Historical, and Categorical
     num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', 'isAdult']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
-                 'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
+                 'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
     X = pd.concat([df[num_cols + hist_cols], df_cat], axis=1)
     y = df['user_score']
@@ -304,6 +323,16 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
     studio_str = ", ".join(main_studios) if main_studios else ", ".join(all_studios)
     producer_str = ", ".join(producers)
     
+    # Extract key creators from staff
+    staff_data = anime_data_dict.get('staff', {}).get('edges', [])
+    creators = []
+    for s in staff_data:
+        role = (s.get('role') or '').lower()
+        name = s.get('node', {}).get('name', {}).get('full', '')
+        if name and ('director' in role or 'original creator' in role or 'original story' in role or 'series composition' in role or 'original character design' in role):
+            creators.append(name)
+    creator_str = ", ".join(creators) if creators else ""
+    
     tags_str_list = []
     for t in anime_data_dict.get('tags', []):
         t_name = str(t['name']).replace('=', '-').replace(',', '')
@@ -343,6 +372,7 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
         'tags': ", ".join(tags_str_list),
         'studios': studio_str,
         'producers': producer_str,
+        'creators': creator_str,
         'sort_date': pd.Timestamp('2100-01-01') # Put firmly at the absolute end of history
     }
     
@@ -364,3 +394,164 @@ def build_inference_features(anime_data_dict, user_history_df, train_columns):
     X_inference = X_inference.fillna(0)
     
     return X_inference
+
+def engineer_manga_features(df: pd.DataFrame):
+    """Takes cleaned manga dataframe and outputs model-ready dataset.
+    Uses chapters instead of episodes/duration, releaseYear instead of seasonYear,
+    and authors instead of studios/producers."""
+    if df.empty:
+        return df
+        
+    # Ensure chronological order
+    if 'sort_date' not in df.columns:
+        df['sort_date'] = df['completedAt'].fillna(df['updatedAt'])
+        
+    df['sort_date'] = pd.to_datetime(df['sort_date'], errors='coerce')
+    df['sort_date'] = df['sort_date'].fillna(pd.Timestamp('1970-01-01'))
+    df = df.sort_values('sort_date').reset_index(drop=True)
+    
+    # For manga, we reuse the same historical feature engine.
+    # We need 'studios' and 'producers' columns for create_historical_features to work.
+    # Map authors -> studios, leave producers empty.
+    if 'studios' not in df.columns:
+        df['studios'] = df.get('authors', '')
+    if 'producers' not in df.columns:
+        df['producers'] = ''
+    if 'creators' not in df.columns:
+        df['creators'] = df.get('authors', '')  # For manga, authors are the creators
+    
+    # Create historical features (running state logic is domain-agnostic)
+    df = create_historical_features(df)
+    
+    # Fill NAs in historical features
+    df['hist_user_mean'] = df['hist_user_mean'].fillna(df['user_score'].mean() if len(df) > 0 else 5.0)
+    df['recent_mean_score'] = df['recent_mean_score'].fillna(df['hist_user_mean'])
+    df['hist_franchise_count'] = df['hist_franchise_count'].fillna(0)
+    df['hist_char_count'] = df['hist_char_count'].fillna(0)
+    for col in ['hist_format_affinity', 'hist_genre_affinity', 'hist_tag_affinity', 'hist_studio_affinity', 'hist_producer_affinity', 'hist_creator_affinity', 'hist_franchise_mean', 'hist_char_mean']:
+        df[col] = df[col].fillna(df['hist_user_mean'])
+        
+    # Manga Numeric Features
+    df['chapters'] = df['chapters'].fillna(0)
+    df['releaseYear'] = df['releaseYear'].fillna(df['releaseYear'].median() if not df['releaseYear'].isna().all() else 2015.0)
+    
+    df['averageScore'] = df['averageScore'].replace(0, np.nan)
+    avg_score_median = df['averageScore'].median() if not df['averageScore'].isna().all() else 70.0
+    df['averageScore'] = df['averageScore'].fillna(avg_score_median) / 10.0
+    
+    pop_median = df['popularity'].median() if not df['popularity'].isna().all() else 1000.0
+    if 'media_status' in df.columns:
+        unreleased_mask = df['media_status'] == 'NOT_YET_RELEASED'
+        df.loc[unreleased_mask, 'popularity'] = np.nan
+    df['popularity'] = np.log1p(df['popularity'].fillna(pop_median))
+    
+    fav_median = df['favourites'].median() if not df['favourites'].isna().all() else 10.0
+    if 'media_status' in df.columns:
+        unreleased_mask = df['media_status'] == 'NOT_YET_RELEASED'
+        df.loc[unreleased_mask, 'favourites'] = np.nan
+    df['favourites'] = np.log1p(df['favourites'].fillna(fav_median))
+    
+    df['isAdult'] = df['isAdult'].fillna(0).astype(int)
+    
+    # Categorical (One-Hot / Multi-Hot)
+    categorical_cols = ['format', 'countryOfOrigin']
+    df_cat = pd.get_dummies(df[categorical_cols], dummy_na=True, drop_first=False)
+    
+    # Genres Multi-Hot
+    all_genres = set()
+    for row_genres in df['genres']:
+        all_genres.update(_get_list(row_genres))
+    for g in all_genres:
+        if not g: continue
+        df_cat[f'genre_{g}'] = df['genres'].apply(lambda x: 1.0 if g in _get_list(x) else 0.0)
+        
+    # Tags Multi-Hot with Ranks
+    all_tags = set()
+    for row_tags in df['tags']:
+        all_tags.update(_get_tags_with_ranks(row_tags).keys())
+    for t in all_tags:
+        if not t: continue
+        df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
+
+    # Combine
+    num_cols = ['chapters', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult']
+    hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
+                 'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
+                 
+    X = pd.concat([df[num_cols + hist_cols], df_cat], axis=1)
+    y = df['user_score']
+    
+    return X, y
+
+def build_manga_inference_features(manga_data_dict, user_history_df, train_columns):
+    """
+    Given a new manga dict from API and user manga history df, construct the 1-row feature matrix.
+    """
+    # Staff (author / artist)
+    staff_data = manga_data_dict.get('staff', {}).get('edges', [])
+    authors = []
+    for s in staff_data:
+        role = (s.get('role') or '').lower()
+        name = s.get('node', {}).get('name', {}).get('full', '')
+        if name and ('story' in role or 'art' in role or 'original' in role):
+            authors.append(name)
+    author_str = ", ".join(authors) if authors else ""
+    
+    tags_str_list = []
+    for t in manga_data_dict.get('tags', []):
+        t_name = str(t['name']).replace('=', '-').replace(',', '')
+        t_rank = t.get('rank', 0)
+        tags_str_list.append(f"{t_name}={t_rank}")
+    
+    relations_data = manga_data_dict.get('relations', {}).get('edges', [])
+    related_ids = []
+    char_related_ids = []
+    valid_types = ['ADAPTATION', 'PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'ALTERNATIVE', 'SPIN_OFF', 'OTHER', 'SOURCE', 'COMPILATION', 'CONTAINS']
+    for edge in relations_data:
+        node_id = edge.get('node', {}).get('id')
+        if not node_id: continue
+        r_type = edge.get('relationType')
+        if r_type == 'CHARACTER':
+            char_related_ids.append(str(node_id))
+        elif r_type in valid_types or r_type:
+            related_ids.append(str(node_id))
+    
+    start_date = manga_data_dict.get('startDate', {}) or {}
+    release_year = start_date.get('year')
+            
+    row = {
+        'user_score': np.nan,
+        'mediaId': manga_data_dict.get('id'),
+        'media_status': manga_data_dict.get('status'),
+        'related_ids': ",".join(related_ids),
+        'char_related_ids': ",".join(char_related_ids),
+        'format': manga_data_dict.get('format'),
+        'chapters': manga_data_dict.get('chapters'),
+        'releaseYear': release_year,
+        'averageScore': manga_data_dict.get('averageScore'),
+        'countryOfOrigin': manga_data_dict.get('countryOfOrigin'),
+        'favourites': manga_data_dict.get('favourites'),
+        'isAdult': 1 if manga_data_dict.get('isAdult') else 0,
+        'popularity': manga_data_dict.get('popularity'),
+        'genres': ", ".join(manga_data_dict.get('genres', [])),
+        'tags': ", ".join(tags_str_list),
+        'authors': author_str,
+        'sort_date': pd.Timestamp('2100-01-01')
+    }
+    
+    new_df = pd.DataFrame([row])
+    combined = pd.concat([user_history_df, new_df], ignore_index=True)
+    
+    X, _ = engineer_manga_features(combined)
+    
+    X_last = X.iloc[[-1]].copy()
+    
+    for col in train_columns:
+        if col not in X_last.columns:
+            X_last[col] = 0
+            
+    X_inference = X_last[train_columns]
+    X_inference = X_inference.fillna(0)
+    
+    return X_inference
+

@@ -13,8 +13,8 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from .dataset import build_user_dataframe
-from .features import engineer_features, temporal_train_val_test_split
+from .dataset import build_user_dataframe, build_user_manga_dataframe
+from .features import engineer_features, engineer_manga_features, temporal_train_val_test_split
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +164,92 @@ def train_and_evaluate_all_models(username: str) -> Dict[str, Any]:
     artifact_path = MODELS_DIR / f"{username}_best_model.pkl"
     joblib.dump(model_artifact, artifact_path)
     logger.info(f"Saved best model ({best_model_name}) to {artifact_path}")
+    
+    return model_artifact
+
+def train_and_evaluate_all_manga_models(username: str):
+    """Runs the entire pipeline for a username's MANGA list, evaluates models, saves best."""
+    df_raw = build_user_manga_dataframe(username, force_refresh=True, save_csv=True)
+    if df_raw.empty or len(df_raw) < 10:
+        return {"status": "error", "message": f"Manga dataset for {username} is too small ({len(df_raw) if not df_raw.empty else 0} entries)."}
+        
+    X, y = engineer_manga_features(df_raw)
+    
+    X = X.fillna(0)
+    
+    train_end = int(len(X) * 0.70)
+    val_end = int(len(X) * 0.85)
+
+    X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
+    X_val, y_val = X.iloc[train_end:val_end], y.iloc[train_end:val_end]
+    X_test, y_test = X.iloc[val_end:], y.iloc[val_end:]
+    
+    if len(X_val) == 0 or len(X_test) == 0:
+        logger.warning("Manga dataset too small for 70/15/15 split. Using 80/20.")
+        train_end = int(len(X) * 0.8)
+        X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
+        X_val, y_val = X.iloc[train_end:], y.iloc[train_end:]
+        X_test, y_test = X_val, y_val
+
+    models = {
+        'Baseline (Hist Mean)': BaselineModel(),
+        'Ridge Regression': Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
+        'KNN Regressor': Pipeline([('scaler', StandardScaler()), ('knn', KNeighborsRegressor(n_neighbors=5, weights='distance'))]),
+        'Decision Tree (Raw)': DecisionTreeRegressor(random_state=42, min_samples_leaf=3),
+        'Decision Tree (Pruned)': train_pruned_tree(X_train, y_train, X_val, y_val),
+        'Random Forest': RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=42),
+        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42),
+        'Voting Ensemble (Smooth)': VotingRegressor([
+            ('rf', RandomForestRegressor(n_estimators=100, min_samples_leaf=1, random_state=42)),
+            ('ridge', Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=5.0))]))
+        ], weights=[0.6, 0.4])
+    }
+
+    results = []
+    trained_models = {}
+    
+    for name, model in models.items():
+        if name != 'Decision Tree (Pruned)' and name != 'Baseline (Hist Mean)':
+             model.fit(X_train, y_train)
+        
+        preds = model.predict(X_test)
+        metrics = evaluate_model(y_test, preds, name)
+        results.append(metrics)
+        trained_models[name] = model
+        
+    results_df = pd.DataFrame(results).sort_values('MAE')
+    logger.info(f"\nManga Model Comparison for {username}:\n" + results_df.to_string(index=False))
+    
+    best_model_name = 'Voting Ensemble (Smooth)'
+    best_model = trained_models[best_model_name]
+    
+    feature_importance = None
+    if hasattr(best_model, 'feature_importances_'):
+        feature_importance = pd.DataFrame({
+            'Feature': X_train.columns,
+            'Importance': best_model.feature_importances_
+        }).sort_values('Importance', ascending=False).head(15).to_dict('records')
+    elif hasattr(best_model, 'estimators_'):
+        for est in best_model.estimators_:
+            if hasattr(est, 'feature_importances_'):
+                feature_importance = pd.DataFrame({
+                    'Feature': X_train.columns,
+                    'Importance': est.feature_importances_
+                }).sort_values('Importance', ascending=False).head(15).to_dict('records')
+                break
+
+    model_artifact = {
+        'username': username,
+        'model_name': best_model_name,
+        'model': best_model,
+        'train_columns': list(X_train.columns),
+        'metrics': results_df.to_dict('records'),
+        'feature_importance': feature_importance
+    }
+    
+    artifact_path = MODELS_DIR / f"{username}_manga_best_model.pkl"
+    joblib.dump(model_artifact, artifact_path)
+    logger.info(f"Saved best manga model ({best_model_name}) to {artifact_path}")
     
     return model_artifact
 
