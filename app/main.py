@@ -26,6 +26,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import logging
 
+from src.api import CACHE_DIR
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="AniList AI Predictor", layout="wide", page_icon="🎬")
@@ -174,7 +175,7 @@ if mode == "Profilo AniList (Machine Learning)":
                 
                 # Exclude already watched/read
                 cache_prefix = "user_manga_list_" if is_manga else "user_list_"
-                cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/{cache_prefix}{username.lower()}.json")
+                cache_path = CACHE_DIR / f"{cache_prefix}{username.lower()}.json"
                 watched_ids = set()
                 if cache_path.exists():
                     try:

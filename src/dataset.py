@@ -7,7 +7,8 @@ from .api import fetch_user_anime_list, fetch_user_manga_list
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/data")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = ROOT_DIR / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 def parse_date(date_dict):

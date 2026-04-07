@@ -25,7 +25,8 @@ from .features import engineer_features, engineer_manga_features
 logger = logging.getLogger(__name__)
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-MODELS_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/models")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MODELS_DIR = ROOT_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 MIN_DATASET_SIZE = 30

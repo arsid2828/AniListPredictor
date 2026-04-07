@@ -4,8 +4,9 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-MODELS_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/models")
-CACHE_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/cache")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+MODELS_DIR = ROOT_DIR / "models"
+CACHE_DIR = ROOT_DIR / "cache"
 
 CUSTOM_CSS = """
 <style>
@@ -146,7 +147,7 @@ def init_session_state():
 
 def check_planning_status(username, media_id, media_type="anime"):
     prefix = "user_list_" if media_type == "anime" else "user_manga_list_"
-    cache_path = Path(f"c:/Users/arsid/Desktop/AnilistProject/cache/{prefix}{username.lower()}.json")
+    cache_path = CACHE_DIR / f"{prefix}{username.lower()}.json"
     if cache_path.exists():
         try:
             with open(cache_path, 'r', encoding='utf-8') as f:

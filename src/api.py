@@ -8,7 +8,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-CACHE_DIR = Path("c:/Users/arsid/Desktop/AnilistProject/cache")
+ROOT_DIR = Path(__file__).resolve().parent.parent
+CACHE_DIR = ROOT_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 CACHE_TTL_HOURS = 24
