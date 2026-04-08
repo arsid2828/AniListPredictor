@@ -162,16 +162,25 @@ if mode == "Profilo AniList (Machine Learning)":
         st.markdown("---")
         st.subheader(f"🌟 Top 10 Raccomandazioni {media_label}")
         
+        candidate_limit = st.slider(
+            "Numeri di candidati da analizzare (Popolari e Top Rated):", 
+            min_value=10, 
+            max_value=1000, 
+            value=500, 
+            step=10,
+            help="Più candidati selezioni, più accurata sarà la ricerca, ma impiegherà più tempo per scaricare i dati da AniList."
+        )
+        
         rec_col1, rec_col2 = st.columns([3, 1])
         with rec_col1:
             rec_btn = st.button(f"✨ Genera Raccomandazioni {media_label}", use_container_width=True)
         
         if rec_btn:
-            with st.spinner("Scarico candidati e calcolo predizioni personalizzate..."):
+            with st.spinner(f"Scarico {candidate_limit} candidati e calcolo predizioni personalizzate..."):
                 if is_manga:
-                    candidates = get_candidate_manga_for_recommendations(limit=500)
+                    candidates = get_candidate_manga_for_recommendations(limit=candidate_limit)
                 else:
-                    candidates = get_candidate_anime_for_recommendations(limit=500)
+                    candidates = get_candidate_anime_for_recommendations(limit=candidate_limit)
                 
                 # Exclude already watched/read
                 cache_prefix = "user_manga_list_" if is_manga else "user_list_"
@@ -414,9 +423,25 @@ elif mode == "Nuovo Utente (Cold Start)":
         st.markdown("---")
         st.header(f"🎯 Top 10 {media_label} Consigliati")
         
+        cs_limit_col, cs_btn_col = st.columns([3, 1])
+        with cs_limit_col:
+            candidate_limit_cs = st.slider(
+                "Numeri di candidati da analizzare (Popolari e Top Rated):", 
+                min_value=10, 
+                max_value=1000, 
+                value=500, 
+                step=10,
+                help="Più candidati selezioni, più accurata sarà la ricerca, ma impiegherà più tempo."
+            )
+        with cs_btn_col:
+            if st.button("🔄 Genera / Aggiorna", use_container_width=True):
+                if rec_key in st.session_state:
+                    del st.session_state[rec_key]
+                st.rerun()
+        
         if rec_key not in st.session_state:
-            with st.spinner(f"Calcolo raccomandazioni {media_label.lower()}..."):
-                cands = get_candidate_manga_for_recommendations(limit=500) if is_manga else get_candidate_anime_for_recommendations(limit=500)
+            with st.spinner(f"Calcolo raccomandazioni {media_label.lower()} su {candidate_limit_cs} candidati..."):
+                cands = get_candidate_manga_for_recommendations(limit=candidate_limit_cs) if is_manga else get_candidate_anime_for_recommendations(limit=candidate_limit_cs)
                 fav_ids = {a['id'] for a in st.session_state[fav_key]}
                 cands = [c for c in cands if c['id'] not in fav_ids]
                 recs = generate_manga_cold_start_recommendations(profile, cands) if is_manga else generate_cold_start_recommendations(profile, cands)
