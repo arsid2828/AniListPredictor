@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import logging
+from datetime import datetime
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import VotingRegressor
 
@@ -174,3 +175,77 @@ def compute_compatibility(df1, df2, username1="User 1", username2="User 2"):
 
 def mean_absolute_error(y1, y2):
     return np.mean(np.abs(np.array(y1) - np.array(y2)))
+
+# ========== ACTIVITY ANALYTICS ==========
+
+def compute_activity_stats(activities, media_type="ANIME"):
+    """Compute analytical stats from a user's activity history."""
+    if not activities:
+        return None
+        
+    valid_statuses = ['watched episode', 'completed'] if media_type == "ANIME" else ['read chapter', 'completed']
+    rows = []
+    
+    for act in activities:
+        st = act.get('status')
+        if st in valid_statuses:
+            dt = datetime.fromtimestamp(act['createdAt'])
+            dur = act.get('media', {}).get('duration') or 0
+            if media_type == "MANGA":
+                dur = 5
+                
+            ep = 1
+            prog = act.get('progress')
+            if prog and '-' in str(prog):
+                parts = str(prog).split('-')
+                try:
+                    p_start = int(parts[0].strip())
+                    p_end = int(parts[1].strip())
+                    if p_end >= p_start:
+                        ep = p_end - p_start + 1
+                except ValueError:
+                    pass
+            
+            title_dict = act.get('media', {}).get('title', {})
+            t_str = title_dict.get('english') or title_dict.get('romaji') or "Sconosciuto"
+            
+            rows.append({
+                'date': dt.date(),
+                'month': dt.strftime('%Y-%m'),
+                'year': str(dt.year),
+                'duration_hours': (dur * ep) / 60.0,
+                'episodes': ep,
+                'title': t_str
+            })
+            
+    if not rows:
+        return None
+        
+    df = pd.DataFrame(rows)
+    
+    # By month
+    month_stats = df.groupby('month').agg({'episodes': 'sum', 'duration_hours': 'sum'}).reset_index().sort_values('month')
+    # By year
+    year_stats = df.groupby('year').agg({'episodes': 'sum', 'duration_hours': 'sum'}).reset_index().sort_values('year')
+    # Max day
+    day_stats = df.groupby('date').agg({
+        'episodes': 'sum', 
+        'duration_hours': 'sum',
+        'title': lambda x: list(set(x))
+    }).reset_index()
+    
+    if day_stats.empty:
+        return None
+        
+    max_day_row = day_stats.loc[day_stats['episodes'].idxmax()]
+    
+    return {
+        'month_stats': month_stats,
+        'year_stats': year_stats,
+        'max_day': {
+            'date': str(max_day_row['date']),
+            'episodes': int(max_day_row['episodes']),
+            'hours': float(max_day_row['duration_hours']),
+            'titles': max_day_row['title']
+        }
+    }

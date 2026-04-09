@@ -4,6 +4,7 @@ import numpy as np
 import json
 import sys
 import io
+import time
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -157,6 +158,8 @@ if mode == "Profilo AniList (Machine Learning)":
             
             if model_artifact.get('optuna_result'):
                 st.write("**Optuna Tuning:**", model_artifact['optuna_result'])
+
+
 
         # === TOP 10 RECOMMENDATIONS ===
         st.markdown("---")

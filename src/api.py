@@ -548,6 +548,80 @@ def get_candidate_manga_for_recommendations(limit: int = 500):
         
     return list(unique_candidates.values())
 
+USER_ACTIVITY_QUERY = """
+query ($userId: Int, $page: Int, $type: ActivityType) {
+  Page(page: $page, perPage: 50) {
+    pageInfo { hasNextPage }
+    activities(userId: $userId, type: $type, sort: ID_DESC) {
+      ... on ListActivity {
+        id
+        createdAt
+        progress
+        status
+        media {
+          title { romaji english }
+          episodes
+          chapters
+          duration
+        }
+      }
+    }
+  }
+}
+"""
+
+USER_ID_QUERY = """
+query ($name: String) {
+  User(name: $name) { id }
+}
+"""
+
+def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_refresh: bool = False):
+    """Fetch user's activity history (anime or manga) from AniList."""
+    cache_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
+    
+    if not force_refresh and _is_cache_valid(cache_path):
+        logger.info(f"Loading cached activity history for {username} ({media_type})")
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+            
+    logger.info(f"Fetching user ID for {username}")
+    try:
+        data = fetch_with_retry(USER_ID_QUERY, {"name": username})
+        user_id = data.get("User", {}).get("id")
+        if not user_id:
+            return None
+    except Exception as e:
+        logger.error(f"Failed to fetch user ID: {e}")
+        return None
+        
+    activities = []
+    page = 1
+    has_next = True
+    
+    logger.info(f"Fetching activity history for user: {username} (ID: {user_id})")
+    
+    while has_next and page <= 200:  # Max 10,000 activities limitation to avoid infinite loop
+        variables = {"userId": user_id, "page": page, "type": f"{media_type.upper()}_LIST"}
+        try:
+            data = fetch_with_retry(USER_ACTIVITY_QUERY, variables)
+        except Exception as e:
+            logger.error(f"Failed to fetch activity page {page}: {e}")
+            break
+            
+        page_info = data.get("Page", {}).get("pageInfo", {})
+        acts = data.get("Page", {}).get("activities", [])
+        
+        activities.extend(acts)
+        has_next = page_info.get("hasNextPage", False)
+        page += 1
+        time.sleep(0.5)
+        
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(activities, f, ensure_ascii=False, indent=2)
+        
+    return activities
+
 if __name__ == "__main__":
     # Test script locally
     username = "arsid"  # Test with an example username or yours
