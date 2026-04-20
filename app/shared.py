@@ -208,11 +208,11 @@ def get_cached_profiles():
             name = re.sub(r'_manga_best_model$', '', name)
             name = re.sub(r'_best_model$', '', name)
             if name:
-                profiles.add(name)
+                profiles.add(name.lower())
     # Also check cache for fetched-but-not-yet-trained profiles
     if CACHE_DIR.exists():
         for f in CACHE_DIR.glob("user_list_*.json"):
             name = f.stem.replace('user_list_', '')
             if name:
-                profiles.add(name)
-    return sorted(profiles)
+                profiles.add(name.lower())
+    return sorted(list(profiles))

@@ -41,21 +41,43 @@ df['sort_date'] = pd.to_datetime(df['sort_date'], errors='coerce')
 
 st.markdown(f"### Profilo **{username}** — {len(df)} {media_label.lower()} valutati")
 
+with st.expander("📚 Glossario delle Metriche"):
+    st.markdown("""
+    *   **Media Voto**: La tua valutazione media personale.
+    *   **Deviazione Std**: Quanto variano i tuoi voti. Una deviazione alta indica che dai molti 10 e molti 1. Una bassa indica voti molto simili tra loro.
+    *   **Tendenza**: Compara il tuo voto con la media globale di AniList. 
+        *   **Generoso**: Voti mediamente più alto degli altri.
+        *   **Severo**: Voti mediamente più basso degli altri.
+    *   **Indice Contrarian**: Misura quanto i tuoi gusti 'divergono' dalla massa. Più è alto, più sei un anticonformista!
+    """)
+
 # ========== SUMMARY METRICS ==========
 bias = compute_user_bias(df)
 
 col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
-    st.metric("Media Voto", bias['mean_score'])
+    st.metric("Media Voto", bias['mean_score'], help="Il tuo voto medio calcolato su tutti i titoli in lista.")
 with col2:
-    st.metric("Deviazione Std", bias['std_score'])
+    st.metric("Deviazione Std", bias['std_score'], help="Variabilità dei tuoi voti. Una deviazione di ~1.5 è normale.")
 with col3:
     st.metric("Titoli Valutati", bias['total_rated'])
 with col4:
+    # Improved Tendenza Display
+    colors = {"generoso": "#00b09b", "severo": "#eb3349", "allineato": "#a0a0b0"}
     direction_emoji = {"generoso": "😇", "severo": "😤", "allineato": "😐"}
-    st.metric("Tendenza", f"{direction_emoji.get(bias['direction'], '')} {bias['direction'].title()}")
+    label = bias['direction'].title()
+    color = colors.get(bias['direction'], "#ffffff")
+    
+    st.markdown(f"""
+    <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; border-left: 5px solid {color};">
+        <div style="font-size: 0.8rem; color: #a0a0b0; text-transform: uppercase;">Tendenza</div>
+        <div style="font-size: 1.2rem; font-weight: 700; color: {color};">
+            {direction_emoji.get(bias['direction'], '')} {label}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 with col5:
-    st.metric("Indice Contrarian", bias['contrarian_index'])
+    st.metric("Indice Contrarian", bias['contrarian_index'], help="Più è alto, più i tuoi voti si scostano dalla media della community.")
 
 st.caption(f"📏 Deviazione media dalla community: **{bias['mean_diff']:+.2f}** punti | "
            f"Scostamento assoluto medio: **{bias['abs_mean_diff']:.2f}**")

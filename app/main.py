@@ -66,28 +66,53 @@ if mode == "Profilo AniList (Machine Learning)":
             username_default = st.session_state.get("username", "")
         
         username_input = st.text_input("Enter AniList Username:", value=username_default)
+        username_lower = username_input.strip().lower()
         
         model_trained_key = "model_trained_manga" if is_manga else "model_trained_anime"
-        btn_label = "🚀 Fetch & Train Manga" if is_manga else "🚀 Fetch & Train Anime"
         
-        if st.button(btn_label):
-            media_label = "manga" if is_manga else "anime"
-            with st.spinner(f"Fetching {media_label} data, training 10 models + Optuna tuning..."):
-                st.session_state["username"] = username_input
-                if is_manga:
-                    result = train_and_evaluate_all_manga_models(username_input)
-                else:
-                    result = train_and_evaluate_all_models(username_input)
+        # Check if model exists for metadata
+        model_suffix = "_manga_best_model.pkl" if is_manga else "_best_model.pkl"
+        model_path = MODELS_DIR / f"{username_lower}{model_suffix}"
+        
+        if model_path.exists():
+            try:
+                meta = joblib.load(model_path)
+                trained_at = meta.get('trained_at', 'Sconosciuto')
+                if trained_at != 'Sconosciuto':
+                    trained_at = datetime.fromisoformat(str(trained_at)).strftime("%d/%m/%Y %H:%M")
+                st.info(f"💾 Modello trovato!\nUltimo training: {trained_at}")
+            except:
+                st.warning("⚠️ Errore lettura metadata.")
+
+        col_load, col_train = st.columns(2)
+        
+        with col_load:
+            if st.button("📂 Carica", use_container_width=True, disabled=not model_path.exists()):
+                st.session_state["username"] = username_lower
+                st.session_state[model_trained_key] = True
+                st.rerun()
                 
-                if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
-                    if result.get("status") == "fallback":
-                        st.warning(result["message"])
+        with col_train:
+            btn_label = "🔥 Allena/Retrain"
+            if st.button(btn_label, use_container_width=True):
+                media_label = "manga" if is_manga else "anime"
+                with st.spinner(f"Fetching {media_label} data, training..."):
+                    st.session_state["username"] = username_lower
+                    if is_manga:
+                        result = train_and_evaluate_all_manga_models(username_lower)
                     else:
-                        st.error(result["message"])
-                    st.session_state[model_trained_key] = False
-                else:
-                    st.success(f"✅ Modello migliore: **{result['model_name']}** — {result['dataset_size']} titoli analizzati")
-                    st.session_state[model_trained_key] = True
+                        result = train_and_evaluate_all_models(username_lower)
+                    
+                    if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
+                        if result.get("status") == "fallback":
+                            st.warning(result["message"])
+                        else:
+                            st.error(result["message"])
+                        st.session_state[model_trained_key] = False
+                    else:
+                        st.success(f"✅ Completato!")
+                        st.session_state[model_trained_key] = True
+                        st.rerun()
 
     model_trained_key = "model_trained_manga" if is_manga else "model_trained_anime"
     

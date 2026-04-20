@@ -403,7 +403,7 @@ def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dic
         'X_train_sample': result['X_train_sample'],
     }
     
-    artifact_path = MODELS_DIR / f"{username}_best_model.pkl"
+    artifact_path = MODELS_DIR / f"{username.lower()}_best_model.pkl"
     joblib.dump(model_artifact, artifact_path)
     logger.info(f"Saved best anime model ({result['model_name']}) to {artifact_path}")
     
@@ -436,7 +436,7 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) 
         'X_train_sample': result['X_train_sample'],
     }
     
-    artifact_path = MODELS_DIR / f"{username}_manga_best_model.pkl"
+    artifact_path = MODELS_DIR / f"{username.lower()}_manga_best_model.pkl"
     joblib.dump(model_artifact, artifact_path)
     logger.info(f"Saved best manga model ({result['model_name']}) to {artifact_path}")
     

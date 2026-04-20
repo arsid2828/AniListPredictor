@@ -146,7 +146,7 @@ def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: b
     df = df.sort_values('sort_date').reset_index(drop=True)
     
     if save_csv:
-        csv_path = DATA_DIR / f"{username}_clean.csv"
+        csv_path = DATA_DIR / f"{username.lower()}_clean.csv"
         df.to_csv(csv_path, index=False)
         logger.info(f"Dataset saved to {csv_path}")
         
@@ -260,7 +260,7 @@ def build_user_manga_dataframe(username: str, force_refresh: bool = False, save_
     df = df.sort_values('sort_date').reset_index(drop=True)
     
     if save_csv:
-        csv_path = DATA_DIR / f"{username}_manga_clean.csv"
+        csv_path = DATA_DIR / f"{username.lower()}_manga_clean.csv"
         df.to_csv(csv_path, index=False)
         logger.info(f"Manga dataset saved to {csv_path}")
         
