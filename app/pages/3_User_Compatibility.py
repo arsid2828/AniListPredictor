@@ -12,13 +12,13 @@ from app.shared import inject_css, init_session_state, render_user_badge
 import plotly.express as px
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Compatibilità Utenti", layout="wide", page_icon="👥")
+st.set_page_config(page_title="User Compatibility", layout="wide", page_icon="👥")
 inject_css()
 init_session_state()
 render_user_badge()
 
-st.title("👥 Compatibilità tra Due Utenti")
-st.write("Confronta i gusti di due utenti AniList basandoti sui titoli valutati in comune.")
+st.title("👥 Compatibility Between Two Users")
+st.write("Compare the tastes of two AniList users based on commonly rated titles.")
 
 media_type = st.radio("Tipo:", ["🎬 Anime", "📖 Manga"], horizontal=True)
 is_manga = "Manga" in media_type
@@ -30,9 +30,9 @@ with col1:
 with col2:
     user2 = st.text_input("👤 Username 2:", key="compat_u2")
 
-if user1 and user2 and st.button("🔍 Calcola Compatibilità", use_container_width=True):
+if user1 and user2 and st.button("🔍 Calculate Compatibility", use_container_width=True):
     if user1.lower() == user2.lower():
-        st.warning("Devi inserire due username diversi!")
+        st.warning("You must enter two different usernames!")
         st.stop()
     
     with st.spinner(f"Scarico i dati {media_label.lower()} di entrambi gli utenti..."):
@@ -44,16 +44,16 @@ if user1 and user2 and st.button("🔍 Calcola Compatibilità", use_container_wi
             df2 = build_user_dataframe(user2, force_refresh=False, save_csv=False)
     
     if df1 is None or df1.empty:
-        st.error(f"Nessun dato trovato per {user1}. Profilo privato o inesistente?")
+        st.error(f"No data found for {user1}. Private or non-existent profile?")
         st.stop()
     if df2 is None or df2.empty:
-        st.error(f"Nessun dato trovato per {user2}. Profilo privato o inesistente?")
+        st.error(f"No data found for {user2}. Private or non-existent profile?")
         st.stop()
     
     result = compute_compatibility(df1, df2, user1, user2)
     
     if result['status'] == 'insufficient':
-        st.warning(f"Solo {result['common_count']} {media_label.lower()} in comune — servono almeno 3 per un'analisi significativa.")
+        st.warning(f"Only {result['common_count']} {media_label.lower()} in common — at least 3 are needed for meaningful analysis.")
         st.stop()
     
     # ========== RESULTS ==========
@@ -69,7 +69,7 @@ if user1 and user2 and st.button("🔍 Calcola Compatibilità", use_container_wi
     elif compat >= 50:
         compat_color = "#f2994a"
         compat_emoji = "🤝"
-        compat_text = "Buona Compatibilità"
+        compat_text = "Good Compatibility"
     else:
         compat_color = "#eb3349"
         compat_emoji = "⚡"
@@ -136,7 +136,7 @@ if user1 and user2 and st.button("🔍 Calcola Compatibilità", use_container_wi
     common_df['diff'] = (common_df['user_score_1'] - common_df['user_score_2']).abs()
     common_df = common_df.sort_values('diff', ascending=False)
     
-    st.subheader("🔥 I Disaccordi Più Grandi")
+    st.subheader("🔥 The Biggest Disagreements")
     disagree = common_df.head(10)
     for _, row in disagree.iterrows():
         title = row.get('title', row.get('title_1', 'N/A'))
@@ -145,7 +145,7 @@ if user1 and user2 and st.button("🔍 Calcola Compatibilità", use_container_wi
         bar = "🟢" if d < 1 else ("🟡" if d < 2 else "🔴")
         st.write(f"{bar} **{title}** — {user1}: {s1:.1f} vs {user2}: {s2:.1f} (Δ {d:.1f})")
     
-    st.subheader("💚 I Più D'Accordo")
+    st.subheader("💚 Most Agreed Upon")
     agree = common_df.tail(10).iloc[::-1]
     for _, row in agree.iterrows():
         title = row.get('title', row.get('title_1', 'N/A'))

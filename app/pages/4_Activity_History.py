@@ -13,24 +13,24 @@ from app.shared import inject_css, init_session_state, render_user_badge
 import plotly.express as px
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Storico Attività", layout="wide", page_icon="📅")
+st.set_page_config(page_title="Activity History", layout="wide", page_icon="📅")
 inject_css()
 init_session_state()
 render_user_badge()
 
-st.title("📅 Storico Analitico Attività")
-st.markdown("Statistiche pure basate sulla tua cronologia reale di AniList (episodi visti e capitoli letti). Esclude automaticamente le attività *Plan to Watch* ecc.")
+st.title("📅 Analytical Activity History")
+st.markdown("Pure statistics based on your real AniList history (episodes watched and chapters read). Automatically excludes *Plan to Watch* activities etc.")
 
 username = st.session_state.get("username", "")
 if not username:
-    st.info("👈 Torna alla pagina principale e inserisci il tuo username per iniziare.")
+    st.info("👈 Return to the main page and enter your username to start.")
     st.stop()
 
 # Media toggle
-media_type_raw = st.radio("Seleziona Media:", ["🎬 Anime", "📖 Manga"], horizontal=True)
+media_type_raw = st.radio("Select Media:", ["🎬 Anime", "📖 Manga"], horizontal=True)
 media_type = "MANGA" if "Manga" in media_type_raw else "ANIME"
 media_label = "Manga" if media_type == "MANGA" else "Anime"
-unit_label = "Capitoli" if media_type == "MANGA" else "Episodi"
+unit_label = "Capitoli" if media_type == "MANGA" else "Episodes"
 
 history_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
 
@@ -38,11 +38,11 @@ if st.button(f"⬇️ Scarica / Aggiorna History {media_label} (richiede tempo p
     with st.spinner(f"Scaricamento history {media_label} da AniList in corso... Attendere."):
         acts = fetch_user_activity_history(username, media_type=media_type, force_refresh=True)
         if acts:
-            st.success(f"History {media_label} scaricata con successo! Ricaricamento in corso...")
+            st.success(f"{media_label} History downloaded successfully! Reloading...")
             time.sleep(1)
             st.rerun()
         else:
-            st.warning("Nessuna attività trovata o profilo privato.")
+            st.warning("No activity found or private profile.")
 
 if history_path.exists():
     try:
@@ -62,7 +62,7 @@ if history_path.exists():
                 for title in stats['max_day']['titles']:
                     st.write(f"- {title}")
             
-            st.markdown(f"#### {unit_label} per Mese")
+            st.markdown(f"#### {unit_label} per Month")
             if media_type == "ANIME":
                 fig_month = go.Figure(data=[
                     go.Bar(name=unit_label, x=stats['month_stats']['month'], y=stats['month_stats']['episodes']),
@@ -84,7 +84,7 @@ if history_path.exists():
             
             st.plotly_chart(fig_month, use_container_width=True)
             
-            st.markdown(f"#### {unit_label} per Anno")
+            st.markdown(f"#### {unit_label} per Year")
             if media_type == "ANIME":
                 fig_year = px.bar(stats['year_stats'], x='year', y=['episodes', 'duration_hours'], barmode='group', 
                                   labels={'value': 'Quantità', 'variable': 'Metrica', 'year': 'Anno'},
@@ -96,8 +96,8 @@ if history_path.exists():
                 
             st.plotly_chart(fig_year, use_container_width=True)
         else:
-            st.info(f"Non ci sono abbastanza attività di {media_label.lower()} per generare statistiche analitiche.")
+            st.info(f"Not enough {media_label.lower()} activity to generate analytical statistics.")
     except Exception as e:
-        st.error(f"Errore nella generazione delle statistiche: {e}")
+        st.error(f"Error generating statistics: {e}")
 else:
-    st.info(f"Clicca sul pulsante per scaricare lo storico {media_label}.")
+    st.info(f"Click the button to download the {media_label} history.")

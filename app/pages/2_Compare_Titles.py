@@ -21,8 +21,8 @@ inject_css()
 init_session_state()
 render_user_badge()
 
-st.title("⚖️ Confronta Due Titoli")
-st.write("Inserisci due anime o manga per confrontare i punteggi previsti e capire le differenze.")
+st.title("⚖️ Compare Two Titles")
+st.write("Enter two anime or manga to compare their predicted scores and see the differences.")
 
 username = st.session_state.get("username", "")
 
@@ -39,7 +39,7 @@ else:
     csv_path = DATA_DIR / f"{username}_clean.csv"
 
 if not username or not model_path.exists():
-    st.info("👈 Torna alla pagina principale, inserisci il tuo username e traina il modello prima.")
+    st.info("👈 Return to the main page, enter your username and train the model first.")
     st.stop()
 
 model_artifact = joblib.load(model_path)
@@ -61,7 +61,7 @@ with col_left:
         results1 = search_manga_by_title(q1) if is_manga else search_anime_by_title(q1)
         if results1:
             opts1 = {f"{r['title'].get('english') or r['title'].get('romaji')}": r for r in results1}
-            sel1 = st.selectbox("Seleziona A:", list(opts1.keys()), key="cmp_sel1")
+            sel1 = st.selectbox("Select A:", list(opts1.keys()), key="cmp_sel1")
             selected_1 = opts1[sel1]
             img1 = selected_1.get('coverImage', {}).get('large', '')
             if img1:
@@ -75,7 +75,7 @@ with col_right:
         results2 = search_manga_by_title(q2) if is_manga else search_anime_by_title(q2)
         if results2:
             opts2 = {f"{r['title'].get('english') or r['title'].get('romaji')}": r for r in results2}
-            sel2 = st.selectbox("Seleziona B:", list(opts2.keys()), key="cmp_sel2")
+            sel2 = st.selectbox("Select B:", list(opts2.keys()), key="cmp_sel2")
             selected_2 = opts2[sel2]
             img2 = selected_2.get('coverImage', {}).get('large', '')
             if img2:
@@ -136,7 +136,7 @@ if selected_1 and selected_2 and st.button("⚡ Confronta!", use_container_width
         shap2, exp2 = get_shap_explanation(model, X2)
         
         if shap1 is not None and shap2 is not None:
-            st.markdown("### 🧠 SHAP — Perché questi voti?")
+            st.markdown("### 🧠 SHAP — Why these scores?")
             
             shap_df1 = shap_to_dataframe(shap1, train_columns, top_n=10)
             shap_df2 = shap_to_dataframe(shap2, train_columns, top_n=10)

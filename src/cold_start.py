@@ -9,8 +9,8 @@ GENRES_LIST = [
 ]
 
 FORMATS_LIST = ["TV", "MOVIE", "OVA", "ONA", "SPECIAL", "ANY"]
-LENGTHS_LIST = ["CORTO (<14)", "MEDIO (14-26)", "LUNGO (27+)", "ANY"]
-ERAS_LIST = ["CLASSICI (Pre-2000)", "MODERNI (2000-2015)", "RECENTI (Post-2015)", "ANY"]
+LENGTHS_LIST = ["SHORT (<14)", "MEDIUM (14-26)", "LONG (27+)", "ANY"]
+ERAS_LIST = ["CLASSICS (Pre-2000)", "MODERN (2000-2015)", "RECENT (Post-2015)", "ANY"]
 
 def build_cold_start_profile(favorite_anime_list, preferred_genres, avoided_genres, preferred_format, preferred_length, preferred_era):
     """
@@ -89,16 +89,16 @@ def check_length_match(candidate_eps, candidate_format, pref_length):
         
     eps = int(candidate_eps)
     
-    if "CORTO" in pref_length: # < 14
+    if "SHORT" in pref_length: # < 14
         if eps < 14: return "MATCH", 1.0
         elif eps <= 26: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -0.5
-    elif "MEDIO" in pref_length: # 14 - 26
+    elif "MEDIUM" in pref_length: # 14 - 26
         if 14 <= eps <= 26: return "MATCH", 1.0
         elif eps < 14: return "MISMATCH_1", 0.0
         elif eps <= 50: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -0.5
-    elif "LUNGO" in pref_length: # 27+
+    elif "LONG" in pref_length: # 27+
         if eps >= 27: return "MATCH", 1.0
         elif 14 <= eps <= 26: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -1.0
@@ -111,14 +111,14 @@ def check_era_match(candidate_year, pref_era):
         
     year = int(candidate_year)
     
-    if "CLASSICI" in pref_era:
+    if "CLASSICS" in pref_era:
         if year < 2000: return 1.0
         elif year <= 2010: return 0.0
         else: return -0.5
-    elif "MODERNI" in pref_era:
+    elif "MODERN" in pref_era:
         if 2000 <= year <= 2015: return 1.0
         else: return -0.3
-    elif "RECENTI" in pref_era:
+    elif "RECENT" in pref_era:
         if year > 2015: return 1.0
         elif year >= 2010: return 0.0
         else: return -0.5
@@ -146,44 +146,44 @@ def content_based_heuristic_scorer(candidate, profile):
     if avoided_match:
         penalty = len(avoided_match) * 2.5
         score -= penalty
-        explanations.append(f"❌ Fortemente sconsigliato (-{penalty}): Contiene generi che eviti ({', '.join(avoided_match)}).")
+        explanations.append(f"❌ Strongly discouraged (-{penalty}): Contains genres you avoid ({', '.join(avoided_match)}).")
         
     # Preferred Genres
     pref_match = set(profile['explicit']['preferred_genres']).intersection(cand_genres)
     if pref_match:
         bonus = len(pref_match) * 1.0
         score += bonus
-        explanations.append(f"✅ Ottimo Match Generi (+{bonus}): Contiene i tuoi generi preferiti ({', '.join(pref_match)}).")
+        explanations.append(f"✅ Great Genre Match (+{bonus}): Contains your favorite genres ({', '.join(pref_match)}).")
         
     # Explicit Format
     pref_format = profile['explicit']['preferred_format']
     if pref_format != "ANY":
         if cand_format == pref_format:
             score += 0.8
-            explanations.append(f"🎬 Formato Preferito (+0.8): È un anime {pref_format}.")
+            explanations.append(f"🎬 Preferred Format (+0.8): It is an anime {pref_format}.")
         elif cand_format:
             score -= 0.5
-            explanations.append(f"⚠️ Formato Diverso (-0.5): Hai preferito {pref_format}, ma questo è {cand_format}.")
+            explanations.append(f"⚠️ Different Format (-0.5): You preferred {pref_format}, but this is {cand_format}.")
             
     # Explicit Length
     pref_length = profile['explicit']['preferred_length']
     l_status, l_bonus = check_length_match(cand_eps, cand_format, pref_length)
     if l_status == "MATCH":
         score += 0.5
-        explanations.append(f"⏱️ Lunghezza Ideale (+0.5): In linea con le tue preferenze sulla lunghezza.")
+        explanations.append(f"⏱️ Ideal Length (+0.5): In line with your length preferences.")
     elif l_status == "MISMATCH_2":
         score += l_bonus
-        explanations.append(f"⏳ Lunghezza Sgradita ({l_bonus}): È troppo lungo o troppo corto per i tuoi gusti.")
+        explanations.append(f"⏳ Disliked Length ({l_bonus}): It is too long or too short for your tastes.")
         
     # Explicit Era
     pref_era = profile['explicit']['preferred_era']
     era_bonus = check_era_match(cand_year, pref_era)
     if era_bonus > 0:
         score += 0.5
-        explanations.append(f"📅 Epoca Preferita (+0.5): Rilasciato nel periodo storico che preferisci ({cand_year}).")
+        explanations.append(f"📅 Preferred Era (+0.5): Released in your preferred historical period ({cand_year}).")
     elif era_bonus < 0:
         score += era_bonus
-        explanations.append(f"🕰️ Epoca Diversa ({era_bonus}): Rilasciato in un periodo diverso da quello cercato.")
+        explanations.append(f"🕰️ Different Era ({era_bonus}): Released in a different period than what you sought.")
 
     # 2. IMPLICIT PREFERENCES (from favorites)
     # Implicit Genres matching (Bonus capped at +1.5 to not overthrow explicit)
@@ -195,7 +195,7 @@ def content_based_heuristic_scorer(candidate, profile):
     if implicit_genre_score > 0:
         implicit_genre_score = min(implicit_genre_score, 1.5)
         score += implicit_genre_score
-        explanations.append(f"🔍 Tracce Simili (+{implicit_genre_score:.2f}): Ha generi in comune con i tuoi anime preferiti iniziali.")
+        explanations.append(f"🔍 Similar Traces (+{implicit_genre_score:.2f}): Shares genres with your initial favorite anime.")
         
     # Implicit Tags (Themes)
     implicit_tag_score = 0.0
@@ -211,16 +211,16 @@ def content_based_heuristic_scorer(candidate, profile):
         implicit_tag_score = min(implicit_tag_score, 2.0)
         score += implicit_tag_score
         top_matched = ", ".join(matched_tags[:3])
-        explanations.append(f"🎭 Tematiche Affini (+{implicit_tag_score:.2f}): Condivide tematiche forti con i tuoi preferiti (es. {top_matched}).")
+        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (es. {top_matched}).")
         
     # Global Quality Base (Tie-breaker for overall goodness)
     global_diff = cand_avg_score - 7.0
     global_bonus = global_diff * 0.3 # If global 9.0 -> +0.6. If global 5.0 -> -0.6
     score += global_bonus
     if global_bonus > 0.3:
-        explanations.append(f"🏆 Apprezzato dalla Critica (+{global_bonus:.2f}): L'alta qualità globale lo rende una scommessa sicura.")
+        explanations.append(f"🏆 Critically Acclaimed (+{global_bonus:.2f}): High global quality makes it a safe bet.")
     elif global_bonus < -0.3:
-        explanations.append(f"📉 Basso Gradimento Globale ({global_bonus:.2f}): La community lo reputa un titolo mediocre.")
+        explanations.append(f"📉 Low Global Rating ({global_bonus:.2f}): The community considers it mediocre.")
         
     # Clip final score
     final_score = float(np.clip(score, 0.0, 10.0))
@@ -256,7 +256,7 @@ def generate_cold_start_recommendations(profile, candidates_list):
 # ============================
 
 MANGA_FORMATS_LIST = ["MANGA", "LIGHT_NOVEL", "ONE_SHOT", "ANY"]
-MANGA_LENGTHS_LIST = ["BREVE (<20 cap)", "MEDIO (20-100 cap)", "LUNGO (100+ cap)", "ANY"]
+MANGA_LENGTHS_LIST = ["SHORT (<20 cap)", "MEDIUM (20-100 cap)", "LONG (100+ cap)", "ANY"]
 
 def build_manga_cold_start_profile(favorite_manga_list, preferred_genres, avoided_genres, preferred_format, preferred_length, preferred_era):
     """Builds a mock user profile for manga cold start."""
@@ -322,16 +322,16 @@ def check_manga_length_match(candidate_chapters, pref_length):
         
     chaps = int(candidate_chapters)
     
-    if "BREVE" in pref_length:
+    if "SHORT" in pref_length:
         if chaps < 20: return "MATCH", 1.0
         elif chaps <= 100: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -0.5
-    elif "MEDIO" in pref_length:
+    elif "MEDIUM" in pref_length:
         if 20 <= chaps <= 100: return "MATCH", 1.0
         elif chaps < 20: return "MISMATCH_1", 0.0
         elif chaps <= 200: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -0.5
-    elif "LUNGO" in pref_length:
+    elif "LONG" in pref_length:
         if chaps > 100: return "MATCH", 1.0
         elif 20 <= chaps <= 100: return "MISMATCH_1", 0.0
         else: return "MISMATCH_2", -1.0
@@ -357,40 +357,40 @@ def content_based_heuristic_scorer_manga(candidate, profile):
     if avoided_match:
         penalty = len(avoided_match) * 2.5
         score -= penalty
-        explanations.append(f"❌ Fortemente sconsigliato (-{penalty}): Contiene generi che eviti ({', '.join(avoided_match)}).")
+        explanations.append(f"❌ Strongly discouraged (-{penalty}): Contains genres you avoid ({', '.join(avoided_match)}).")
         
     pref_match = set(profile['explicit']['preferred_genres']).intersection(cand_genres)
     if pref_match:
         bonus = len(pref_match) * 1.0
         score += bonus
-        explanations.append(f"✅ Ottimo Match Generi (+{bonus}): Contiene i tuoi generi preferiti ({', '.join(pref_match)}).")
+        explanations.append(f"✅ Great Genre Match (+{bonus}): Contains your favorite genres ({', '.join(pref_match)}).")
         
     pref_format = profile['explicit']['preferred_format']
     if pref_format != "ANY":
         if cand_format == pref_format:
             score += 0.8
-            explanations.append(f"📖 Formato Preferito (+0.8): È un {pref_format}.")
+            explanations.append(f"📖 Preferred Format (+0.8): It is a {pref_format}.")
         elif cand_format:
             score -= 0.5
-            explanations.append(f"⚠️ Formato Diverso (-0.5): Hai preferito {pref_format}, ma questo è {cand_format}.")
+            explanations.append(f"⚠️ Different Format (-0.5): You preferred {pref_format}, but this is {cand_format}.")
             
     pref_length = profile['explicit']['preferred_length']
     l_status, l_bonus = check_manga_length_match(cand_chapters, pref_length)
     if l_status == "MATCH":
         score += 0.5
-        explanations.append(f"📏 Lunghezza Ideale (+0.5): In linea con le tue preferenze sul numero di capitoli.")
+        explanations.append(f"📏 Ideal Length (+0.5): In line with your chapter count preferences.")
     elif l_status == "MISMATCH_2":
         score += l_bonus
-        explanations.append(f"📏 Lunghezza Sgradita ({l_bonus}): Troppi o troppo pochi capitoli per i tuoi gusti.")
+        explanations.append(f"📏 Disliked Length ({l_bonus}): Too many or too few chapters for your taste.")
         
     pref_era = profile['explicit']['preferred_era']
     era_bonus = check_era_match(cand_year, pref_era)
     if era_bonus > 0:
         score += 0.5
-        explanations.append(f"📅 Epoca Preferita (+0.5): Pubblicato nel periodo storico che preferisci ({cand_year}).")
+        explanations.append(f"📅 Preferred Era (+0.5): Published in your preferred historical period ({cand_year}).")
     elif era_bonus < 0:
         score += era_bonus
-        explanations.append(f"🕰️ Epoca Diversa ({era_bonus}): Pubblicato in un periodo diverso da quello cercato.")
+        explanations.append(f"🕰️ Different Era ({era_bonus}): Published in a different period than what you sought.")
 
     # 2. IMPLICIT PREFERENCES
     implicit_genre_score = 0.0
@@ -400,7 +400,7 @@ def content_based_heuristic_scorer_manga(candidate, profile):
     if implicit_genre_score > 0:
         implicit_genre_score = min(implicit_genre_score, 1.5)
         score += implicit_genre_score
-        explanations.append(f"🔍 Tracce Simili (+{implicit_genre_score:.2f}): Ha generi in comune con i tuoi manga preferiti.")
+        explanations.append(f"🔍 Similar Traces (+{implicit_genre_score:.2f}): Shares genres with your favorite manga.")
         
     implicit_tag_score = 0.0
     matched_tags = []
@@ -413,15 +413,15 @@ def content_based_heuristic_scorer_manga(candidate, profile):
         implicit_tag_score = min(implicit_tag_score, 2.0)
         score += implicit_tag_score
         top_matched = ", ".join(matched_tags[:3])
-        explanations.append(f"🎭 Tematiche Affini (+{implicit_tag_score:.2f}): Condivide tematiche forti con i tuoi preferiti (es. {top_matched}).")
+        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (es. {top_matched}).")
         
     global_diff = cand_avg_score - 7.0
     global_bonus = global_diff * 0.3
     score += global_bonus
     if global_bonus > 0.3:
-        explanations.append(f"🏆 Apprezzato dalla Critica (+{global_bonus:.2f}): L'alta qualità globale lo rende una scommessa sicura.")
+        explanations.append(f"🏆 Critically Acclaimed (+{global_bonus:.2f}): High global quality makes it a safe bet.")
     elif global_bonus < -0.3:
-        explanations.append(f"📉 Basso Gradimento Globale ({global_bonus:.2f}): La community lo reputa un titolo mediocre.")
+        explanations.append(f"📉 Low Global Rating ({global_bonus:.2f}): The community considers it mediocre.")
         
     final_score = float(np.clip(score, 0.0, 10.0))
     return final_score, explanations
