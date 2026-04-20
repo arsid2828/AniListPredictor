@@ -2,54 +2,55 @@
 
 Un ecosistema di Machine Learning ibrido all-in-one progettato per analizzare, profilare e prevedere matematicamente i voti che un utente darà a **Anime** e **Manga** su [AniList](https://anilist.co/).
 
-Il progetto si è evoluto da un semplice regressore a una suite completa di **BI (Business Intelligence) per Otaku**, integrando modelli di stato dell'arte, spiegabilità (XAI) e analytics profonde.
+Il progetto si è evoluto da un semplice regressore a una suite completa di **BI (Business Intelligence) per Otaku**, integrando modelli di stato dell'arte, spiegabilità (XAI) e analytics profonde, con un'interfaccia utente (UI) completamente in lingua inglese.
 
 ---
 
-## ✨ Caratteristiche Tecniche d'Elite
+## 🏗️ Struttura del Progetto e File
 
-### 🔬 Machine Learning Dynamics
-*   **Selezione Dinamica del Modello:** Il sistema non usa più un modello fisso. All'avvio del training, confronta **10 algoritmi** (Decision Trees, Random Forest, Gradient Boosting, Ridge, KNN, XGBoost, LightGBM, Ensemble) e seleziona automaticamente quello con il **MAE (Mean Absolute Error)** più basso.
-*   **Optuna Tuning:** Integrazione con la libreria Optuna per la ricerca bayesiana degli iperparametri (30 trial per sessione), ottimizzando profondità, learning rate e regolarizzazione.
-*   **SHAP Explainability (XAI):** Grazie ai valori di Shapley, ogni singola predizione viene spiegata con un grafico a cascata che mostra esattamente quali feature (es: "Studio Madhouse +0.5", "Tag Seinen +0.3") hanno influenzato il voto finale.
-*   **TimeSeriesSplit CV:** Validazione robusta su 5-fold temporali. Testiamo il modello su diverse finestre del passato dell'utente per garantire la massima stabilità nelle previsioni future.
-*   **Architettura "Leakage-Free":** Feature engineering iterativo che calcola lo stato storico (frequenze, affinità, mood) senza mai mostrare al modello dati del futuro, simulando un reale processo decisionale umano.
+Il codice è organizzato in due moduli principali: `app/` (che gestisce tutta l'interfaccia utente Streamlit) e `src/` (che contiene il motore logico e predittivo).
 
-### 📊 Deep Profile Analytics
-*   **Contrarian Index:** Misuriamo quanto i tuoi gusti divergono dalla community globale. Sei un "Normie" o un critico severo?
-*   **Radar Chart dei Generi:** Visualizzazione poligonale dell'affinità per genere (Action, Romance, Psychological, ecc.).
-*   **Mood Timeline:** Grafico cronologico con media mobile (Rolling Mean) per visualizzare come i tuoi standard di voto sono cambiati negli anni.
-*   **Studio & Author League:** Ranking degli studi di animazione e degli autori manga basato sulla tua soddisfazione media.
+### Interfaccia Utente (`app/`)
+*   **`main.py`**: È l'**Entry Point** dell'applicazione. Gestisce la dashboard principale, la configurazione iniziale, il login dell'utente (o il flusso *"Cold Start"* per i nuovi utenti), l'addestramento dei modelli e la generazione della "Top 10" delle raccomandazioni utente. Mostra a colpo d'occhio le metriche del modello migliore elaborato.
+*   **`shared.py`**: Contiene il **Design System** e le utility condivise dell'app (come l'iniezione del CSS, la configurazione degli stati di sessione e il setup dei badge utente) garantendo coerenza estetica su tutte le pagine.
 
-### 🛸 Cold Start & Compatibility
-*   **Onboarding Hard-Filtered:** Un flusso a step per nuovi utenti che costruisce uno pseudo-profilo. Include ora il supporto per ogni genere (incluso **Hentai**) e filtri rigorosi sul formato (Movies vs TV).
-*   **Compatibilità Utente:** Inserisci due username AniList e ottieni un report di affinità con Gauge Chart, scatter plot dei voti comuni e lista dei "punti di massimo disaccordo".
+**Le Pagine (in `app/pages/`)**
+*   **`1_Profile_Analysis.py`**: **L'Analisi Profilo** prende lo storico dell'utente e ne ricava grafici dettagliati. Include la "Distribuzione Voti", il radar dei generi, il "Contrarian Index" (per capire quanto ti discosti dalla massa) e analisi su autori e studi preferiti. Serve a capire a fondo le tue preferenze reali rispetto ai voti dati.
+*   **`2_Compare_Titles.py`**: **Confronto Titoli** permette di mettere due anime (o manga) testa a testa. Usa *Radar Charts* per confrontare generi, formati e punteggi, e integra un'analisi con *SHAP* per spiegare perché al sistema piace più il Titolo A rispetto al Titolo B per te specifico.
+*   **`3_User_Compatibility.py`**: Questa pagina serve a calcolare la **Compatibilità tra Utenti**. Inserendo due username, il sistema confronta i titoli valutati in comune e calcola una % di affinità. Rivela inoltre i titoli su cui gli utenti sono maggiormente in disaccordo o d'accordo (i più grandi match e mismatch).
+*   **`4_Activity_History.py`**: Crea una **Cronologia Interattiva** pura della tua attività. Estrae le date esatte in cui hai guardato episodi o letto capitoli, creando timeline che mostrano mesi o anni più attivi e perfino i record di binge-watching in determinati giorni.
+
+### Il Motore Dietro le Quinte (`src/`)
+*   **`api.py`**: Gestisce tutte le comunicazioni con il backend di AniList. Costruisce le astruse query **GraphQL** per prelevare dati in batch e gestisce un sistema di cache a 24 ore per non spammare le API ufficiali.
+*   **`dataset.py`**: Funziona come una conduttura. Prende l'input grezzo estratto da `api.py` (JSON) e lo manipola, pulisce e aggrega in robusti e strutturati **Dataframe Pandas**, tenendo fuori duplicati ("Completed" vs "Custom Lists") e record invalidi.
+*   **`features.py`**: **Il cuore dell'Alchimia dei Dati.** Questo file preleva i dataset originali e inietta centinaia di *features ingegnerizzate* e vettorializzate: rapporto completamento, punteggi derivati da staff e ruoli chiave (es. Madhouse o Hideaki Anno), encoding per label ordinali e tanto altro per renderli digeribili ai modelli.
+*   **`models.py`**: **Il Motore Machine Learning.** Costruisce decine di modelli e li fa competere contro una Cross-validation TSVC rigorosa. 
+*   **`cold_start.py`**: Entra in gioco quando un utente non ha sufficente storico. Questo set di logiche di **Sistema Esperto ed Euristico** costruisce profili psicografici dell'utente dal nulla, basandosi solo su "3-5 opere preferite" e semplici gusti diretti in input per generare raccomandazioni.
+*   **`analytics.py`**: Contiene la logica matematica e statistica pura per plot, XAI, calcolo dello SHAP (Shapley Value Explainations) formattato ed aggregazioni numeriche.
 
 ---
 
-## 🗂️ Struttura del Progetto
+## 🧠 Modelli di Machine Learning
 
-```
-AnilistProject/
-├── app/
-│   ├── main.py              # Entry point UI Streamlit
-│   ├── shared.py            # Design System (CSS, Badge, Utils)
-│   └── pages/               # Multi-page App
-│       ├── 1_Analisi_Profilo.py
-│       ├── 2_Confronta_Titoli.py
-│       └── 3_Compatibilita_Utenti.py
-├── src/
-│   ├── api.py               # Client GraphQL con Cache TTL (24h)
-│   ├── dataset.py           # Pipeline di pulizia dati
-│   ├── features.py          # Engineering: source, completion_ratio, repeat
-│   ├── models.py            # Motore ML: Optuna, XGBoost, Selection
-│   ├── analytics.py         # Calcoli statistici e SHAP
-│   └── cold_start.py        # Logica euristica per onboarding
-├── cache/                   # Dati JSON temporanei
-├── data/                    # Dataset CSV utente
-├── models/                  # Modelli .pkl salvati
-└── requirements.txt         # Stack tecnologico
-```
+Il sistema non affida tutto a una singola rete neurale bloccata, bensì applica un paradigma iterativo in cui fa gareggiare in simultanea multi-modelli e ne valuta le performance sul MAE (Mean Absolute Error). 
+
+I principali modelli che competono ogni volta per essere il "Miglior Modello Utente" sono:
+
+1.  **LightGBM (LGBMRegressor)**: Veloce e potente. Usa il gradient boosting basato su alberi decisionali ed excels nella modellazione di distribuzioni complesse sui pattern di gradimento. (Ideale con abbondanti valutazioni).
+2.  **XGBoost (XGBRegressor)**: Un'architettura di boosting rinomata, eccellente a gestire i "missing values" propri dei dati di anime molto di nicchia. Spesso pesantemente regolarizzato ed estremamente affidabile.
+3.  **Random Forest**: Robusto verso gli outlier. Crea centinaia di alberi indipendenti che "votano", perfetto se storicamente si distribuiscono voti sia altissimi che molto bassi senza criteri precisi nel genere ("Random").
+4.  **Gradient Boosting (standard)**: Modello base del boosting per catturare i gradienti residui su pattern più lineari.
+5.  **Ridge Regression (L2)**: Utilizzato per stabilire una base (baseline) matematica lineare e non sovralimentata (overfit).
+6.  **KNN (K-Nearest Neighbors)**: Raggruppa i pattern dell'utente basandosi sulla vicinanza in vettori n-dimensionali. In soldoni, se un anime è "vicinissimo" a molti altri anime dati a "10", prende "10". Ottimo per i cluster puristi di genere.
+7.  **Ensemble Classico (Voting)**: Una sintesi pura orchestrata per mettere i tre colossi (**Random Forest + Gradient Boosting + XGBoost**) a discutere e sommare pacificamente le loro risposte per creare una singola ed eccellente predizione ibrida super resiliente.
+
+Tutti i modelli vengono instradati tramite **Optuna**, un tuner a ottimizzazione bayesiana. Optuna non sceglie a caso hiperparametri (come la profondità degli alberi) ma capisce la dinamica matematica dei round predittivi passati per perfezionare le successive iterazioni nei suoi *30 trial di test*.
+
+---
+
+## ✨ Explainable AI (XAI) con SHAP
+
+Non ci accontentiamo di capire se l'algoritmo predice '8.5', ma **perché lo fa**. Avvalendoci dei valori SHAP (*SHapley Additive exPlanations*) resi visibili sul frontend dell'APP ("Perché questi voti?"), il Predictor dimostra quanta "spinta", positiva o negativa, una singola caratteristica dell'opera testata ha scaturito sull'incremento finale di voto (es. `Maturity Rating +0.40`).
 
 ---
 
@@ -80,15 +81,13 @@ AnilistProject/
     ```
 
 3.  **Utilizzo:**
-    *   **Login:** Inserisci il tuo username AniList o selezionalo dal dropdown dei profili caricati in precedenza.
-    *   **Training:** Premi "Fetch & Train" per generare il tuo modello neurale personalizzato.
-    *   **Esplora:** Naviga tra le pagine laterali per analizzare il tuo profilo, confrontare titoli o testare la compatibilità con un amico.
-    *   **Esporta:** Scarica le tue raccomandazioni in formato **CSV** o **JSON**.
+    *   **Dashboard (`app/main.py`)**: Scegli "AniList Profile", inserisci il tuo username e premi il bottone per trainare il modello. Dopodiché genererà direttamente la tua top 10 predittiva.
+    *   **Pagine Laterali (da menu)**: Sperimenta con Profilo, Compatibilità tra te e un amico o Analisi dei Titoli a parità di predizione.
 
 ---
 
 ## 🛡️ Privacy e Cache
-I dati vengono salvati localmente nelle cartelle `cache/` e `data/`. La cache dell'API scade automaticamente ogni **24 ore** per garantirti dati sempre aggiornati senza sovraccaricare i server di AniList.
+I dati vengono salvati localmente nelle cartelle `cache/` (in formato leggero JSON) e `data/` (come pesanti dataset in ML CSV). La cache dell'API scade automaticamente ogni **24 ore** per garantirti dati sempre aggiornati senza sovraccaricare i server di AniList.
 
 ---
 *Sviluppato con ❤️ per la community di AniList.*
