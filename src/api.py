@@ -218,6 +218,7 @@ query ($userName: String, $chunk: Int) {
           title { romaji english }
           format
           chapters
+          volumes
           startDate { year }
           averageScore
           meanScore
@@ -261,6 +262,7 @@ query ($search: String) {
       title { romaji english }
       format
       chapters
+      volumes
       startDate { year }
       averageScore
       meanScore
@@ -306,6 +308,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
       title { romaji english }
       format
       chapters
+      volumes
       startDate { year }
       averageScore
       meanScore

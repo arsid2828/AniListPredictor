@@ -227,6 +227,7 @@ def build_user_manga_dataframe(username: str, force_refresh: bool = False, save_
                 # Media Info (Manga-specific)
                 'format': media.get('format'),
                 'chapters': media.get('chapters'),
+                'volumes': media.get('volumes'),
                 'releaseYear': release_year,
                 'averageScore': media.get('averageScore'),
                 'meanScore': media.get('meanScore'),

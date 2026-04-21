@@ -442,6 +442,13 @@ def engineer_manga_features(df: pd.DataFrame):
         
     # Manga Numeric Features
     df['chapters'] = df['chapters'].fillna(0)
+    df['volumes'] = df.get('volumes', pd.Series([0]*len(df))).fillna(0)
+    
+    # Manhwas do not have volumes and shouldn't be penalized.
+    # We impute volumes = chapters // 9 (a standard average for JP manga)
+    # for any manga that has 0 volumes but > 0 chapters.
+    mask_needs_volumes = (df['volumes'] == 0) & (df['chapters'] > 0)
+    df.loc[mask_needs_volumes, 'volumes'] = np.ceil(df.loc[mask_needs_volumes, 'chapters'] / 9.0)
     df['releaseYear'] = df['releaseYear'].fillna(df['releaseYear'].median() if not df['releaseYear'].isna().all() else 2015.0)
     
     df['averageScore'] = df['averageScore'].replace(0, np.nan)
@@ -488,7 +495,7 @@ def engineer_manga_features(df: pd.DataFrame):
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine
-    num_cols = ['chapters', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
+    num_cols = ['chapters', 'volumes', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
                  'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
@@ -541,6 +548,7 @@ def build_manga_inference_features(manga_data_dict, user_history_df, train_colum
         'char_related_ids': ",".join(char_related_ids),
         'format': manga_data_dict.get('format'),
         'chapters': manga_data_dict.get('chapters'),
+        'volumes': manga_data_dict.get('volumes'),
         'releaseYear': release_year,
         'averageScore': manga_data_dict.get('averageScore'),
         'countryOfOrigin': manga_data_dict.get('countryOfOrigin'),
