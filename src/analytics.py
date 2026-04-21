@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 import logging
 from datetime import datetime
+import json
+from collections import defaultdict
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import VotingRegressor
 
@@ -54,6 +56,150 @@ def shap_to_dataframe(shap_values, feature_names, top_n=15):
 
 
 # ========== PROFILE ANALYTICS ==========
+
+def compute_franchise_stats(df, username, is_manga=False):
+    """Calcola le statistiche dei franchise basandosi sulle relazioni originali."""
+    from .dataset import DATA_DIR
+    cache_dir = DATA_DIR.parent / "cache"
+    cache_file = cache_dir / (f"user_manga_list_{username.lower()}.json" if is_manga else f"user_list_{username.lower()}.json")
+    
+    if not cache_file.exists():
+        return pd.DataFrame()
+        
+    try:
+        with open(cache_file, 'r', encoding='utf-8') as f:
+            raw_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Error reading cache: {e}")
+        return pd.DataFrame()
+
+    # Build adjacency list
+    adj = defaultdict(set)
+    media_info = {}
+    
+    valid_types = ['ADAPTATION', 'PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SUMMARY', 'ALTERNATIVE', 'SPIN_OFF', 'SOURCE', 'COMPILATION', 'CONTAINS']
+    
+    # Extract from raw data
+    for str_list in raw_data:
+        entries = str_list.get('entries', [])
+        for entry in entries:
+            media = entry.get('media', {})
+            if not media: continue
+            
+            m_id = str(media.get('id'))
+            title_dict = media.get('title', {})
+            title = title_dict.get('english') or title_dict.get('romaji') or m_id
+            
+            media_info[m_id] = {
+                'id': m_id,
+                'title': title,
+                'format': media.get('format', ''),
+                'popularity': media.get('popularity', 0),
+                'year': media.get('seasonYear') or (media.get('startDate', {}) or {}).get('year') or 2050
+            }
+            
+            relations = media.get('relations', {}).get('edges', [])
+            for edge in relations:
+                r_type = edge.get('relationType')
+                node_id = str(edge.get('node', {}).get('id'))
+                if r_type in valid_types:
+                    adj[m_id].add(node_id)
+                    adj[node_id].add(m_id)
+                    
+    # Find connected components (Franchises)
+    visited = set()
+    components = []
+    
+    for m_id in list(media_info.keys()) + list(adj.keys()):
+        if m_id not in visited:
+            comp = set()
+            stack = [m_id]
+            while stack:
+                curr = stack.pop()
+                if curr not in visited:
+                    visited.add(curr)
+                    comp.add(curr)
+                    stack.extend(adj[curr] - visited)
+            components.append(comp)
+            
+    # Map components to a franchise ID and name
+    df_ids = set(df['mediaId'].astype(str))
+    
+    franchises = []
+    # Usiamo un dizionario per ottimizzare le ricerche nel dataframe
+    df_dict = df.set_index('mediaId').to_dict('index')
+    
+    for comp in components:
+        # Intersect with what the user actually watched/read (in df)
+        watched_in_comp = comp.intersection(df_ids)
+        if not watched_in_comp:
+            continue
+            
+        # Determine Franchise Name:
+        comp_info = [media_info.get(mid) for mid in comp if mid in media_info]
+        if not comp_info:
+            continue
+            
+        # Prioritize main formats
+        main_formats = ['TV', 'MANGA']
+        main_items = [m for m in comp_info if m['format'] in main_formats]
+        
+        if main_items:
+            # oldest main item
+            main_items.sort(key=lambda x: (x['year'], -x['popularity']))
+            franchise_name = main_items[0]['title']
+        else:
+            # oldest overall
+            comp_info.sort(key=lambda x: (x['year'], -x['popularity']))
+            franchise_name = comp_info[0]['title']
+            
+        # Compute stats for this franchise
+        total_score_sum = 0.0
+        total_entries = 0
+        total_progress = 0
+        
+        for mid in watched_in_comp:
+            # get user score from pre-computed dict
+            row = df_dict.get(int(mid) if mid.isdigit() else mid)
+            if not row: continue
+            
+            score = row['user_score']
+            prog = row.get('progress', 0)
+            if pd.isna(prog):
+                prog = 0
+                
+            total_score_sum += score
+            total_progress += prog
+            total_entries += 1
+            
+        if total_entries > 0:
+            avg_score = total_score_sum / total_entries
+            
+            # Bonus per entry (stagioni, film, speciali valgono uguale)
+            entry_bonus = total_entries * 0.05
+            
+            # Bonus per lunghezza (episodi/capitoli totali)
+            # Anime: ~0.1 punti ogni 50 episodi. Manga: ~0.1 punti ogni 100 capitoli.
+            progress_multiplier = 0.001 if is_manga else 0.002
+            progress_bonus = total_progress * progress_multiplier
+            
+            presence_bonus = entry_bonus + progress_bonus
+            final_score = avg_score + presence_bonus
+            
+            franchises.append({
+                'franchise': franchise_name,
+                'avg_score': round(avg_score, 2),
+                'final_score': round(final_score, 2),
+                'total_entries': total_entries,
+                'total_progress': int(total_progress)
+            })
+            
+    res_df = pd.DataFrame(franchises)
+    if not res_df.empty:
+        res_df = res_df.sort_values('final_score', ascending=False)
+        
+    return res_df
+
 
 def compute_genre_stats(df):
     """Average user score per genre."""

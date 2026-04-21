@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 from src.dataset import DATA_DIR
-from src.analytics import compute_genre_stats, compute_studio_stats, compute_score_timeline, compute_user_bias
+from src.analytics import compute_genre_stats, compute_studio_stats, compute_score_timeline, compute_user_bias, compute_franchise_stats
 from app.shared import inject_css, init_session_state, render_user_badge
 import plotly.express as px
 import plotly.graph_objects as go
@@ -167,6 +167,52 @@ if not genre_stats.empty:
         fig_genre.update_layout(template='plotly_dark', height=450, yaxis={'categoryorder': 'total ascending'})
         st.plotly_chart(fig_genre, use_container_width=True)
 
+# ========== FAVORITE FRANCHISES ==========
+st.markdown("---")
+st.markdown(f"### 🏆 Top 10 Franchise Preferiti ({media_label})")
+
+franchise_stats = compute_franchise_stats(df, username, is_manga=is_manga)
+
+if not franchise_stats.empty:
+    top_franchises = franchise_stats.head(10).copy()
+    top_franchises = top_franchises.sort_values('final_score', ascending=True) # Per mostrare il più alto in cima nel bar chart orizzontale
+    
+    fig_franchise = px.bar(
+        top_franchises, 
+        x='final_score', 
+        y='franchise', 
+        orientation='h',
+        color='final_score', 
+        color_continuous_scale='Sunsetdark',
+        title="Top Franchise per Punteggio Ponderato + Bonus Presenza",
+        labels={'final_score': 'Punteggio Franchise', 'franchise': 'Franchise'},
+        hover_data={'avg_score': True, 'total_entries': True, 'total_progress': True}
+    )
+    fig_franchise.update_layout(template='plotly_dark', height=500)
+    
+    # Customize hover template
+    fig_franchise.update_traces(
+        hovertemplate="<b>%{y}</b><br>Punteggio Finale: %{x:.2f}<br>Media Voti: %{customdata[0]:.2f}<br>Totale Opere Viste/Lette: %{customdata[1]}<br>Episodi/Capitoli Totali: %{customdata[2]}<extra></extra>"
+    )
+    
+    st.plotly_chart(fig_franchise, use_container_width=True)
+    
+    with st.expander("ℹ️ Come viene calcolato il punteggio dei Franchise?"):
+        st.markdown(f"""
+        Il punteggio del franchise non è una semplice media dei voti, ma tiene conto di **quanto** di quel franchise hai fruito, bilanciando opere divise in tante stagioni (es. Attack on Titan) con opere lunghissime a stagione singola (es. One Piece).
+        
+        **Regole di calcolo:**
+        1. **Media Voto**: La media aritmetica semplice di tutti i tuoi voti per le opere del franchise.
+        2. **Bonus Presenza**: Viene aggiunto un bonus al punteggio base per premiare la quantità di contenuti:
+           - **+0.05 punti** per ogni singola opera (stagione, film, ova, special, ecc.).
+           - **+0.1 punti** ogni 50 episodi (o ogni 100 capitoli per i manga).
+           
+        In questo modo un anime lunghissimo viene considerato e premiato tanto quanto un anime diviso in molteplici stagioni o film!
+        """)
+else:
+    st.info("Non abbiamo trovato abbastanza dati relazionali per calcolare i franchise, oppure non hai serie collegate.")
+
+
 # ========== STUDIO / AUTHOR RANKING ==========
 st.markdown("---")
 studio_col_name = 'authors' if is_manga and 'authors' in df.columns else 'studios'
@@ -193,7 +239,7 @@ if 'seasonYear' in df.columns or 'releaseYear' in df.columns:
             mean_score=('user_score', 'mean'),
             count=('user_score', 'count')
         ).reset_index()
-        year_stats = year_stats[year_stats['count'] >= 2]
+        year_stats = year_stats[year_stats['count'] >= 1]
         
         if not year_stats.empty:
             fig_year = px.bar(year_stats, x=year_col, y='mean_score',
