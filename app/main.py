@@ -191,14 +191,46 @@ if mode == "AniList Profile (Machine Learning)":
         st.markdown("---")
         st.subheader(f"🌟 Top 10 {media_label} Recommendations")
         
+        with st.expander("ℹ️ How does the Candidate search work?"):
+            st.markdown("""
+            The algorithm sets a global "fishing pool" (the limit below) by fetching half of the results by Popularity and half by Average Score.
+            From this pool, it **discards what you have already watched/read** and applies AI predictions.
+            **Advanced Filters:** You can force the API to fetch *only* media with a certain Genre, Year, or Tag. If you use very strict filters, we recommend **raising the limit to 1000** to ensure you find enough playable results!
+            """)
+            
         candidate_limit = st.slider(
-            "Number of candidates to analyze (Popular and Top Rated):", 
+            "Number of candidates to download (from the global database):", 
             min_value=10, 
             max_value=1000, 
             value=500, 
-            step=10,
-            help="The more candidates you select, the more accurate the search, but it will take longer to download data from AniList."
+            step=10
         )
+        
+        st.markdown("#### 🎯 Advanced Filters (Optional)")
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        with col_f1:
+            genres_opts = ["None", "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Hentai", "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"]
+            sel_genre = st.selectbox("Genre:", genres_opts)
+            sel_genre = None if sel_genre == "None" else sel_genre
+        with col_f2:
+            sel_tag = st.text_input("Tag (e.g., Isekai, Magic):").strip()
+            sel_tag = sel_tag if sel_tag else None
+        with col_f3:
+            if not is_manga:
+                sel_year_str = st.text_input("Year (e.g., 2022):").strip()
+                try:
+                    sel_year = int(sel_year_str) if sel_year_str else None
+                except ValueError:
+                    sel_year = None
+                    st.warning("Invalid year format.")
+            else:
+                st.info("Year filter not supported for manga.")
+                sel_year = None
+        with col_f4:
+            sel_studio = st.text_input("Studio / Author:").strip()
+            sel_studio = sel_studio if sel_studio else None
+            if sel_studio:
+                st.caption("Filtered locally.")
         
         rec_col1, rec_col2 = st.columns([3, 1])
         with rec_col1:
@@ -207,9 +239,27 @@ if mode == "AniList Profile (Machine Learning)":
         if rec_btn:
             with st.spinner(f"Downloading {candidate_limit} candidates and calculating personalized predictions..."):
                 if is_manga:
-                    candidates = get_candidate_manga_for_recommendations(limit=candidate_limit)
+                    candidates = get_candidate_manga_for_recommendations(limit=candidate_limit, genre=sel_genre, tag=sel_tag)
                 else:
-                    candidates = get_candidate_anime_for_recommendations(limit=candidate_limit)
+                    candidates = get_candidate_anime_for_recommendations(limit=candidate_limit, genre=sel_genre, tag=sel_tag, year=sel_year)
+                    
+                if sel_studio:
+                    filtered = []
+                    for c in candidates:
+                        found = False
+                        # check studios
+                        if 'studios' in c and c['studios']:
+                            for e in c['studios'].get('edges', []):
+                                if sel_studio.lower() in e.get('node', {}).get('name', '').lower():
+                                    found = True
+                        # check staff
+                        if 'staff' in c and c['staff']:
+                            for e in c['staff'].get('edges', []):
+                                if sel_studio.lower() in e.get('node', {}).get('name', {}).get('full', '').lower():
+                                    found = True
+                        if found:
+                            filtered.append(c)
+                    candidates = filtered
                 
                 # Exclude already watched/read
                 cache_prefix = "user_manga_list_" if is_manga else "user_list_"

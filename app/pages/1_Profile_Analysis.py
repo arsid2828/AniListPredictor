@@ -169,7 +169,7 @@ if not genre_stats.empty:
 
 # ========== FAVORITE FRANCHISES ==========
 st.markdown("---")
-st.markdown(f"### 🏆 Top 10 Franchise Preferiti ({media_label})")
+st.markdown(f"### 🏆 Top 10 Favorite Franchises ({media_label})")
 
 franchise_stats = compute_franchise_stats(df, username, is_manga=is_manga)
 
@@ -184,33 +184,33 @@ if not franchise_stats.empty:
         orientation='h',
         color='final_score', 
         color_continuous_scale='Sunsetdark',
-        title="Top Franchise per Punteggio Ponderato + Bonus Presenza",
-        labels={'final_score': 'Punteggio Franchise', 'franchise': 'Franchise'},
+        title="Top Franchises by Score + Presence Bonus",
+        labels={'final_score': 'Franchise Score', 'franchise': 'Franchise'},
         hover_data={'avg_score': True, 'total_entries': True, 'total_progress': True}
     )
     fig_franchise.update_layout(template='plotly_dark', height=500)
     
     # Customize hover template
     fig_franchise.update_traces(
-        hovertemplate="<b>%{y}</b><br>Punteggio Finale: %{x:.2f}<br>Media Voti: %{customdata[0]:.2f}<br>Totale Opere Viste/Lette: %{customdata[1]}<br>Episodi/Capitoli Totali: %{customdata[2]}<extra></extra>"
+        hovertemplate="<b>%{y}</b><br>Final Score: %{x:.2f}<br>Average Score: %{customdata[0]:.2f}<br>Total Entries Watched/Read: %{customdata[1]}<br>Total Episodes/Chapters: %{customdata[2]}<extra></extra>"
     )
     
     st.plotly_chart(fig_franchise, use_container_width=True)
     
-    with st.expander("ℹ️ Come viene calcolato il punteggio dei Franchise?"):
+    with st.expander("ℹ️ How is the Franchise score calculated?"):
         st.markdown(f"""
-        Il punteggio del franchise non è una semplice media dei voti, ma tiene conto di **quanto** di quel franchise hai fruito, bilanciando opere divise in tante stagioni (es. Attack on Titan) con opere lunghissime a stagione singola (es. One Piece).
+        The franchise score is not a simple average of the votes, but takes into account **how much** of that franchise you have consumed, balancing works divided into many seasons (e.g. Attack on Titan) with very long single-season works (e.g. One Piece).
         
-        **Regole di calcolo:**
-        1. **Media Voto**: La media aritmetica semplice di tutti i tuoi voti per le opere del franchise.
-        2. **Bonus Presenza**: Viene aggiunto un bonus al punteggio base per premiare la quantità di contenuti:
-           - **+0.05 punti** per ogni singola opera (stagione, film, ova, special, ecc.).
-           - **+0.1 punti** ogni 50 episodi (o ogni 100 capitoli per i manga).
+        **Calculation rules:**
+        1. **Average Score**: The simple arithmetic mean of all your votes for the works in the franchise.
+        2. **Presence Bonus**: A bonus is added to the base score to reward the quantity of content:
+           - **+0.05 points** for each single entry (season, movie, ova, special, etc.).
+           - **+0.1 points** every 50 episodes (or every 100 chapters for manga).
            
-        In questo modo un anime lunghissimo viene considerato e premiato tanto quanto un anime diviso in molteplici stagioni o film!
+        In this way, a very long anime is considered and rewarded as much as an anime divided into multiple seasons or movies!
         """)
 else:
-    st.info("Non abbiamo trovato abbastanza dati relazionali per calcolare i franchise, oppure non hai serie collegate.")
+    st.info("Not enough relational data found to calculate franchises, or no linked series.")
 
 
 # ========== STUDIO / AUTHOR RANKING ==========

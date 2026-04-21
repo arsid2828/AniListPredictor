@@ -144,9 +144,9 @@ query ($search: String) {
 """
 
 ANIME_CANDIDATES_QUERY = """
-query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: String, $seasonYear: Int) {
   Page(page: $page, perPage: $perPage) {
-    media(type: ANIME, sort: $sort) {
+    media(type: ANIME, sort: $sort, genre: $genre, tag: $tag, seasonYear: $seasonYear) {
       id
       title { romaji english }
       format
@@ -301,9 +301,9 @@ query ($search: String) {
 """
 
 MANGA_CANDIDATES_QUERY = """
-query ($page: Int, $perPage: Int, $sort: [MediaSort]) {
+query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: String) {
   Page(page: $page, perPage: $perPage) {
-    media(type: MANGA, sort: $sort) {
+    media(type: MANGA, sort: $sort, genre: $genre, tag: $tag) {
       id
       title { romaji english }
       format
@@ -446,7 +446,7 @@ def search_anime_by_title(title: str):
     data = fetch_with_retry(ANIME_SEARCH_QUERY, variables)
     return data.get("Page", {}).get("media", [])
 
-def get_candidate_anime_for_recommendations(limit: int = 500):
+def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None, tag: str = None, year: int = None):
     """
     Fetch top anime by popularity and top anime by score to serve as candidates.
     Returns a unique list of media dictionaries.
@@ -457,18 +457,25 @@ def get_candidate_anime_for_recommendations(limit: int = 500):
     
     unique_candidates = {}
     
-    logger.info("Fetching most popular anime candidates...")
+    logger.info(f"Fetching anime candidates (limit={limit}, genre={genre}, tag={tag}, year={year})...")
+    
+    base_vars = {}
+    if genre: base_vars["genre"] = genre
+    if tag: base_vars["tag"] = tag
+    if year: base_vars["seasonYear"] = int(year)
+
     for p in range(1, pages_per_category + 1):
         vars_pop = {"page": p, "perPage": per_page, "sort": ["POPULARITY_DESC"]}
+        vars_pop.update(base_vars)
         data = fetch_with_retry(ANIME_CANDIDATES_QUERY, vars_pop)
         media_list = data.get("Page", {}).get("media", [])
         for m in media_list:
             if m: unique_candidates[m['id']] = m
         time.sleep(1) # Polite delay
         
-    logger.info("Fetching highest rated anime candidates...")
     for p in range(1, pages_per_category + 1):
         vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
+        vars_score.update(base_vars)
         data = fetch_with_retry(ANIME_CANDIDATES_QUERY, vars_score)
         media_list = data.get("Page", {}).get("media", [])
         for m in media_list:
@@ -526,24 +533,30 @@ def search_manga_by_title(title: str):
     data = fetch_with_retry(MANGA_SEARCH_QUERY, variables)
     return data.get("Page", {}).get("media", [])
 
-def get_candidate_manga_for_recommendations(limit: int = 500):
+def get_candidate_manga_for_recommendations(limit: int = 500, genre: str = None, tag: str = None):
     limit_per_category = limit // 2
     per_page = 50
     pages_per_category = max(1, limit_per_category // per_page)
     
     unique_candidates = {}
     
-    logger.info("Fetching most popular manga candidates...")
+    logger.info(f"Fetching manga candidates (limit={limit}, genre={genre}, tag={tag})...")
+    
+    base_vars = {}
+    if genre: base_vars["genre"] = genre
+    if tag: base_vars["tag"] = tag
+
     for p in range(1, pages_per_category + 1):
         vars_pop = {"page": p, "perPage": per_page, "sort": ["POPULARITY_DESC"]}
+        vars_pop.update(base_vars)
         data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_pop)
         for m in data.get("Page", {}).get("media", []):
             if m: unique_candidates[m['id']] = m
         time.sleep(1)
         
-    logger.info("Fetching highest rated manga candidates...")
     for p in range(1, pages_per_category + 1):
         vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
+        vars_score.update(base_vars)
         data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_score)
         for m in data.get("Page", {}).get("media", []):
             if m: unique_candidates[m['id']] = m
