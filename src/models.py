@@ -111,22 +111,47 @@ def train_pruned_tree(X_train, y_train, X_val, y_val):
         best_dt = DecisionTreeRegressor(random_state=42, max_depth=5).fit(X_train, y_train)
     return best_dt
 
-def _optuna_tune(X_train, y_train, X_val, y_val, n_trials=30):
-    """Bayesian hyperparameter search across tree-based and neural models."""
+def _get_candidate_models(dataset_size, X_train_inner=None, y_train_inner=None, X_val_inner=None, y_val_inner=None):
+    """Restituisce i modelli candidati in base alla dimensione del dataset esplorata (Gating)."""
+    models = {
+        'Baseline (Hist Mean)': BaselineModel(),
+        'Ridge Regression': Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
+        'Bayesian Ridge (Naive Regression)': Pipeline([('scaler', StandardScaler()), ('bayesian', BayesianRidge())]),
+        'Decision Tree (Raw)': DecisionTreeRegressor(random_state=42, min_samples_leaf=3)
+    }
+    
+    # Pruned tree richiede validation split esplicito
+    if X_train_inner is not None and len(X_train_inner) > 10:
+        models['Decision Tree (Pruned)'] = train_pruned_tree(X_train_inner, y_train_inner, X_val_inner, y_val_inner)
+    
+    if dataset_size > 75:
+        models['Random Forest'] = RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=42)
+        models['Gradient Boosting'] = GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
+        
+    if dataset_size > 150:
+        models['XGBoost'] = XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, verbosity=0)
+        models['LightGBM'] = LGBMRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, verbose=-1)
+        models['Neural Network (MLP)'] = Pipeline([
+            ('scaler', StandardScaler()), 
+            ('mlp', MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42))
+        ])
+        
+    return models
+
+def _optuna_tune(model_name, X_train, y_train, X_val, y_val, n_trials=30):
+    """Ottimizza esclusivamente il modello selezionato sulla fold cronologica di Validation."""
     best_model_obj = [None]
     best_mae_val = [float('inf')]
     
     def objective(trial):
-        model_type = trial.suggest_categorical('model_type', ['rf', 'xgb', 'lgbm', 'gb', 'mlp'])
-        
-        if model_type == 'rf':
+        if 'Random Forest' in model_name:
             model = RandomForestRegressor(
                 n_estimators=trial.suggest_int('rf_n_est', 50, 300),
                 max_depth=trial.suggest_int('rf_depth', 3, 15),
                 min_samples_leaf=trial.suggest_int('rf_msl', 1, 10),
                 random_state=42
             )
-        elif model_type == 'xgb':
+        elif 'XGB' in model_name:
             model = XGBRegressor(
                 n_estimators=trial.suggest_int('xgb_n_est', 50, 300),
                 max_depth=trial.suggest_int('xgb_depth', 3, 10),
@@ -135,7 +160,7 @@ def _optuna_tune(X_train, y_train, X_val, y_val, n_trials=30):
                 subsample=trial.suggest_float('xgb_sub', 0.6, 1.0),
                 random_state=42, verbosity=0
             )
-        elif model_type == 'lgbm':
+        elif 'LightGBM' in model_name:
             model = LGBMRegressor(
                 n_estimators=trial.suggest_int('lgbm_n_est', 50, 300),
                 max_depth=trial.suggest_int('lgbm_depth', 3, 10),
@@ -144,21 +169,7 @@ def _optuna_tune(X_train, y_train, X_val, y_val, n_trials=30):
                 subsample=trial.suggest_float('lgbm_sub', 0.6, 1.0),
                 random_state=42, verbose=-1
             )
-        elif model_type == 'mlp':
-            h1 = trial.suggest_int('mlp_h1', 16, 128)
-            h2 = trial.suggest_int('mlp_h2', 8, 64)
-            model = Pipeline([
-                ('scaler', StandardScaler()),
-                ('mlp', MLPRegressor(
-                    hidden_layer_sizes=(h1, h2),
-                    activation=trial.suggest_categorical('mlp_act', ['relu', 'tanh']),
-                    alpha=trial.suggest_float('mlp_reg', 1e-5, 1e-2, log=True),
-                    learning_rate_init=trial.suggest_float('mlp_lr', 1e-4, 1e-2, log=True),
-                    max_iter=500,
-                    random_state=42
-                ))
-            ])
-        else:
+        elif 'Gradient Boosting' in model_name:
             model = GradientBoostingRegressor(
                 n_estimators=trial.suggest_int('gb_n_est', 50, 300),
                 max_depth=trial.suggest_int('gb_depth', 3, 10),
@@ -166,6 +177,8 @@ def _optuna_tune(X_train, y_train, X_val, y_val, n_trials=30):
                 min_samples_leaf=trial.suggest_int('gb_msl', 1, 10),
                 random_state=42
             )
+        else:
+            raise optuna.exceptions.TrialPruned() # Modello non supportato per il tuning
         
         model.fit(X_train, y_train)
         preds = model.predict(X_val)
@@ -176,11 +189,13 @@ def _optuna_tune(X_train, y_train, X_val, y_val, n_trials=30):
             best_model_obj[0] = model
         
         return mae
-    
+        
     study = optuna.create_study(direction='minimize')
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-    
-    return best_model_obj[0], study.best_value, study.best_params
+    if any(m in model_name for m in ['Random Forest', 'XGB', 'LightGBM', 'Gradient Boosting']):
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+        return best_model_obj[0], study.best_value, study.best_params
+    else:
+        return None, None, None
 
 def _extract_feature_importance(model, columns):
     """Extract feature importance from any model type."""
@@ -188,11 +203,6 @@ def _extract_feature_importance(model, columns):
     
     if hasattr(model, 'feature_importances_'):
         importances = model.feature_importances_
-    elif isinstance(model, VotingRegressor) and hasattr(model, 'estimators_'):
-        for est in model.estimators_:
-            if hasattr(est, 'feature_importances_'):
-                importances = est.feature_importances_
-                break
     elif isinstance(model, Pipeline):
         last_step = model.steps[-1][1]
         if hasattr(last_step, 'feature_importances_'):
@@ -208,18 +218,13 @@ def _extract_feature_importance(model, columns):
 def _get_shap_explanations(model, X_sample, feature_names):
     """Calculate SHAP values for the best model using a small sample."""
     try:
-        # Use a small background sample for faster computation
         bg_sample = X_sample.sample(min(20, len(X_sample)), random_state=42)
-        
-        # Determine specific explainer type
         if hasattr(model, 'feature_importances_') or isinstance(model, (XGBRegressor, LGBMRegressor, RandomForestRegressor)):
             explainer = shap.TreeExplainer(model)
         else:
             explainer = shap.Explainer(model.predict, bg_sample)
             
         shap_values = explainer(bg_sample)
-        
-        # Get mean absolute SHAP values for global Importance
         mean_abs_shap = np.abs(shap_values.values).mean(0)
         shap_df = pd.DataFrame({
             'Feature': feature_names,
@@ -232,148 +237,154 @@ def _get_shap_explanations(model, X_sample, feature_names):
         return None
 
 def _run_tscv(model, X, y, n_splits=5):
-    """Run TimeSeriesSplit cross-validation and return fold MAEs."""
+    """Run TimeSeriesSplit cross-validation on the Train+Val set and return fold MAEs."""
     tscv = TimeSeriesSplit(n_splits=n_splits)
     fold_scores = []
     
-    for train_idx, test_idx in tscv.split(X):
-        X_fold_train, y_fold_train = X.iloc[train_idx], y.iloc[train_idx]
-        X_fold_test, y_fold_test = X.iloc[test_idx], y.iloc[test_idx]
-        
+    for train_idx, val_idx in tscv.split(X):
+        X_t, y_t = X.iloc[train_idx], y.iloc[train_idx]
+        X_v, y_v = X.iloc[val_idx], y.iloc[val_idx]
         try:
-            fold_model = clone(model)
-            fold_model.fit(X_fold_train, y_fold_train)
-            fold_preds = fold_model.predict(X_fold_test)
-            fold_mae = mean_absolute_error(y_fold_test, fold_preds)
-            fold_scores.append(fold_mae)
+            m = clone(model)
+            m.fit(X_t, y_t)
+            p = m.predict(X_v)
+            fold_scores.append(mean_absolute_error(y_v, p))
         except Exception as e:
-            logger.warning(f"TSCV fold failed: {e}")
-    
+            pass
     return fold_scores
 
-def _build_models(X_train, y_train, X_val, y_val):
-    """Build the model dictionary with all candidates, including new Neural and Bayesian models."""
-    return {
-        'Baseline (Hist Mean)': BaselineModel(),
-        'Ridge Regression': Pipeline([('scaler', StandardScaler()), ('ridge', Ridge(alpha=1.0))]),
-        'Bayesian Ridge (Naive Regression)': Pipeline([('scaler', StandardScaler()), ('bayesian', BayesianRidge())]),
-        'Gaussian NB (Naive Classification)': Pipeline([
-            ('scaler', StandardScaler()), 
-            ('nb', ClassifierToRegressorWrapper(GaussianNB()))
-        ]),
-        'KNN Regressor': Pipeline([('scaler', StandardScaler()), ('knn', KNeighborsRegressor(n_neighbors=5, weights='distance'))]),
-        'Decision Tree (Raw)': DecisionTreeRegressor(random_state=42, min_samples_leaf=3),
-        'Decision Tree (Pruned)': train_pruned_tree(X_train, y_train, X_val, y_val),
-        'Random Forest': RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=42),
-        'Gradient Boosting': GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42),
-        'XGBoost': XGBRegressor(n_estimators=200, learning_rate=0.05, max_depth=5, reg_alpha=1.0, random_state=42, verbosity=0),
-        'LightGBM': LGBMRegressor(n_estimators=200, learning_rate=0.05, max_depth=5, reg_alpha=1.0, random_state=42, verbose=-1),
-        'Neural Network (MLP)': Pipeline([
-            ('scaler', StandardScaler()), 
-            ('mlp', MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42))
-        ]),
-        'Voting Ensemble (RF+GB)': VotingRegressor([
-            ('rf', RandomForestRegressor(n_estimators=200, min_samples_leaf=1, random_state=42)),
-            ('gb', GradientBoostingRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42))
-        ], weights=[0.55, 0.45]),
-        'Stacking Ensemble (Advanced)': StackingRegressor(
-            estimators=[
-                ('xgb', XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, verbosity=0)),
-                ('rf', RandomForestRegressor(n_estimators=150, min_samples_leaf=2, random_state=42)),
-                ('nb', ClassifierToRegressorWrapper(GaussianNB()))
-            ],
-            final_estimator=Ridge(alpha=1.0)
-        )
-    }
+def _evaluate_candidates(models, X, y, n_splits=3):
+    """Valuta i modelli candidati rigorosamente su set di Validation (cronologico)."""
+    results = []
+    
+    if len(X) < 40:
+        # Pochi dati: singolo split hold-out cronologico all'interno del Train+Val
+        inner_split = int(len(X) * 0.8)
+        X_train_in, y_train_in = X.iloc[:inner_split], y.iloc[:inner_split]
+        X_val_in, y_val_in = X.iloc[inner_split:], y.iloc[inner_split:]
+        
+        for name, model in models.items():
+            try:
+                if name != 'Baseline (Hist Mean)' and "Pruned" not in name:
+                    model.fit(X_train_in, y_train_in)
+                preds = model.predict(X_val_in)
+                res = evaluate_model(y_val_in, preds, name)
+                results.append(res)
+            except Exception as e:
+                logger.warning(f"Model {name} failed: {e}")
+    else:
+        # Dimensioni Ok: TimeSeriesSplit per la pura Model Selection
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        for name, model in models.items():
+            if name == 'Decision Tree (Pruned)':
+                continue
+            maes, rmses, r2s = [], [], []
+            for train_idx, val_idx in tscv.split(X):
+                X_t, y_t = X.iloc[train_idx], y.iloc[train_idx]
+                X_v, y_v = X.iloc[val_idx], y.iloc[val_idx]
+                try:
+                    m = clone(model)
+                    m.fit(X_t, y_t)
+                    p = m.predict(X_v)
+                    maes.append(mean_absolute_error(y_v, p))
+                    rmses.append(np.sqrt(mean_squared_error(y_v, p)))
+                    r2s.append(r2_score(y_v, p))
+                except Exception as e:
+                    pass
+            if maes:
+                results.append({'model': name, 'MAE': np.mean(maes), 'RMSE': np.mean(rmses), 'R2': np.mean(r2s)})
+            
+        if 'Decision Tree (Pruned)' in models:
+             inner_split = int(len(X) * 0.8)
+             X_val_in, y_val_in = X.iloc[inner_split:], y.iloc[inner_split:]
+             p = models['Decision Tree (Pruned)'].predict(X_val_in)
+             res = evaluate_model(y_val_in, p, 'Decision Tree (Pruned)')
+             results.append(res)
+             
+    if not results:
+        results = [evaluate_model(y, BaselineModel().predict(X), 'Baseline (Hist Mean)')]
+        
+    return pd.DataFrame(results).sort_values('MAE')
 
 def _core_train_pipeline(X, y, use_optuna=True):
-    """Core training logic shared by anime and manga."""
+    """Core training logic (Model Selection rigorosamente su Train/Val, Valutazione onesta su Test finale)."""
     X = X.fillna(0)
+    n_samples = len(X)
     
-    # Chronological split: 70% train, 15% val, 15% test
-    train_end = int(len(X) * 0.70)
-    val_end = int(len(X) * 0.85)
+    # 1. SPLIT TEMPORALE CRONOLOGICO (Isolamento del Test Set)
+    test_end = int(n_samples * 0.85)
+
+    if test_end <= 0 or (n_samples - test_end) < 2:
+        test_end = int(n_samples * 0.8)
+
+    X_train_val = X.iloc[:test_end]
+    y_train_val = y.iloc[:test_end]
+    X_test = X.iloc[test_end:]
+    y_test = y.iloc[test_end:]
     
-    X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
-    X_val, y_val = X.iloc[train_end:val_end], y.iloc[train_end:val_end]
-    X_test, y_test = X.iloc[val_end:], y.iloc[val_end:]
+    # Inner split cronologico per tuning e modelli che richiedono custom validation set
+    inner_split = int(len(X_train_val) * 0.8)
+    X_train_inner = X_train_val.iloc[:inner_split]
+    y_train_inner = y_train_val.iloc[:inner_split]
+    X_val_inner = X_train_val.iloc[inner_split:]
+    y_val_inner = y_train_val.iloc[inner_split:]
     
-    if len(X_val) == 0 or len(X_test) == 0:
-        train_end = int(len(X) * 0.8)
-        X_train, y_train = X.iloc[:train_end], y.iloc[:train_end]
-        X_val, y_val = X.iloc[train_end:], y.iloc[train_end:]
-        X_test, y_test = X_val, y_val
+    # 2. GATING DEI MODELLI (Scartiamo quelli troppo costosi per dataset minimi)
+    models = _get_candidate_models(len(X_train_val), X_train_inner, y_train_inner, X_val_inner, y_val_inner)
     
-    # Build and train all models
-    models = _build_models(X_train, y_train, X_val, y_val)
+    # 3. VALUTAZIONE CANDIDATI (Rigida Validation per il Model Selection)
+    n_splits_cv = 3 if len(X_train_val) > 75 else 2
+    eval_df = _evaluate_candidates(models, X_train_val, y_train_val, n_splits=n_splits_cv)
     
-    results = []
-    trained_models = {}
+    best_model_name = eval_df.iloc[0]['model']
+    best_model = models[best_model_name]
+    metrics_list = eval_df.to_dict('records')
     
-    for name, model in models.items():
-        if name not in ['Decision Tree (Pruned)', 'Baseline (Hist Mean)']:
-            model.fit(X_train, y_train)
-        
-        preds = model.predict(X_test)
-        metrics = evaluate_model(y_test, preds, name)
-        results.append(metrics)
-        trained_models[name] = model
-    
-    results_df = pd.DataFrame(results).sort_values('MAE')
-    
-    # === DYNAMIC MODEL SELECTION ===
-    best_model_name = results_df.iloc[0]['model']
-    best_model = trained_models[best_model_name]
-    
-    # === OPTUNA FINE TUNING ===
+    # 4. TUNING OPTUNA (Solo sul miglior modello emerso, ottimizzato su Train_Val inner)
     optuna_result = None
-    if use_optuna and len(X_train) >= 30:
-        try:
-            optuna_model, optuna_val_mae, optuna_params = _optuna_tune(
-                X_train, y_train, X_val, y_val, n_trials=30
-            )
-            if optuna_model is not None:
-                optuna_test_preds = optuna_model.predict(X_test)
-                optuna_test_metrics = evaluate_model(y_test, optuna_test_preds, "Optuna Tuned")
-                
-                if optuna_test_metrics['MAE'] < results_df.iloc[0]['MAE']:
-                    best_model = optuna_model
-                    best_model_name = f"Optuna Tuned ({type(optuna_model).__name__})"
-                    optuna_test_metrics['model'] = best_model_name
-                    results.append(optuna_test_metrics)
-                    trained_models[best_model_name] = best_model
-                    results_df = pd.DataFrame(results).sort_values('MAE')
-                
-                optuna_result = {'best_params': optuna_params, 'val_mae': optuna_val_mae}
-        except Exception as e:
-            logger.warning(f"Optuna tuning failed: {e}")
+    if use_optuna and len(X_train_val) > 40:
+        optuna_model, optuna_val_mae, optuna_params = _optuna_tune(
+            best_model_name, X_train_inner, y_train_inner, X_val_inner, y_val_inner, n_trials=30
+        )
+        
+        if optuna_model is not None and optuna_val_mae < eval_df.iloc[0]['MAE']:
+            best_model = optuna_model
+            best_model_name = f"Optuna Tuned ({best_model_name})"
+            # Inseriamo i ratio migliori al primo posto
+            metrics_list.insert(0, {'model': best_model_name, 'MAE': round(optuna_val_mae, 4), 'RMSE': 0.0, 'R2': 0.0})
+            optuna_result = {'best_params': optuna_params, 'val_mae': optuna_val_mae}
+            
+    # 5. RETRAIN FINALE PER DEPLOYMENT
+    if best_model_name != 'Baseline (Hist Mean)' and "Pruned" not in best_model_name:
+        best_model.fit(X_train_val, y_train_val) # Usa TUTTO il sapere tranne l'Holdout finale
+        
+    # 6. VALUTAZIONE FINALE ONESTA SUL TEST SET INCONTAMINATO
+    final_preds = best_model.predict(X_test)
+    final_test_metrics = evaluate_model(y_test, final_preds, best_model_name)
     
-    # === TIMESERIES CV ===
-    tscv_scores = None
-    try:
-        tscv_scores = _run_tscv(best_model, X, y, n_splits=min(5, len(X) // 20))
-    except Exception as e:
-        logger.warning(f"TimeSeriesSplit CV failed: {e}")
+    # Riscriviamo i campi 'metriche' del primo risultato cosicché la UI (app/main.py) mostri il punteggio onesto (Test) sul TOP layer
+    metrics_list[0]['MAE'] = final_test_metrics['MAE']
+    metrics_list[0]['RMSE'] = final_test_metrics['RMSE']
+    metrics_list[0]['R2'] = final_test_metrics['R2']
+    metrics_list[0]['model'] = f"{best_model_name} (Test Eval)"
     
-    # Feature importance and SHAP
-    feature_importance = _extract_feature_importance(best_model, X_train.columns)
-    shap_explanations = _get_shap_explanations(best_model, X_val, X_train.columns)
+    tscv_scores = _run_tscv(best_model, X_train_val, y_train_val, n_splits=n_splits_cv)
+    feature_importance = _extract_feature_importance(best_model, X_train_val.columns)
+    shap_explanations = _get_shap_explanations(best_model, X_val_inner, X_train_val.columns)
     
-    # Fallback check
-    best_r2 = results_df.iloc[0]['R2']
-    fallback_recommended = best_r2 < 0
+    fallback_recommended = final_test_metrics.get('R2', 0) < 0
     
     return {
         'model': best_model,
         'model_name': best_model_name,
-        'train_columns': list(X_train.columns),
-        'metrics': results_df.to_dict('records'),
+        'train_columns': list(X_train_val.columns),
+        'metrics': metrics_list,
         'feature_importance': feature_importance,
         'shap_explanations': shap_explanations,
         'optuna_result': optuna_result,
         'tscv_scores': tscv_scores,
         'fallback_recommended': fallback_recommended,
-        'X_train_sample': X_train.sample(min(50, len(X_train)), random_state=42),
+        'X_train_sample': X_train_val.sample(min(50, len(X_train_val)), random_state=42),
     }
 
 def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dict[str, Any]:
