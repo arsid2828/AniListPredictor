@@ -58,7 +58,7 @@ def shap_to_dataframe(shap_values, feature_names, top_n=15):
 # ========== PROFILE ANALYTICS ==========
 
 def compute_franchise_stats(df, username, is_manga=False):
-    """Calcola le statistiche dei franchise basandosi sulle relazioni originali."""
+    """Compute franchise statistics using the original relation graph."""
     from .dataset import DATA_DIR
     cache_dir = DATA_DIR.parent / "cache"
     cache_file = cache_dir / (f"user_manga_list_{username.lower()}.json" if is_manga else f"user_list_{username.lower()}.json")
@@ -269,7 +269,7 @@ def compute_user_bias(df):
     contrarian = abs_mean_diff
     
     # Direction: positive = user rates higher than community
-    direction = "generoso" if mean_diff > 0.2 else ("severo" if mean_diff < -0.2 else "allineato")
+    direction = "generous" if mean_diff > 0.2 else ("strict" if mean_diff < -0.2 else "balanced")
     
     return {
         'mean_diff': round(mean_diff, 2),
@@ -353,7 +353,7 @@ def compute_activity_stats(activities, media_type="ANIME"):
                     pass
             
             title_dict = act.get('media', {}).get('title', {})
-            t_str = title_dict.get('english') or title_dict.get('romaji') or "Sconosciuto"
+            t_str = title_dict.get('english') or title_dict.get('romaji') or "Unknown"
             
             rows.append({
                 'date': dt.date(),

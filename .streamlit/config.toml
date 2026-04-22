@@ -1,0 +1,16 @@
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 5
+
+[browser]
+gatherUsageStats = false
+
+[logger]
+level = "warning"
+messageFormat = "%(asctime)s %(levelname)s: %(message)s"
+
+[theme]
+base = "dark"

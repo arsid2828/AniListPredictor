@@ -211,7 +211,7 @@ def content_based_heuristic_scorer(candidate, profile):
         implicit_tag_score = min(implicit_tag_score, 2.0)
         score += implicit_tag_score
         top_matched = ", ".join(matched_tags[:3])
-        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (es. {top_matched}).")
+        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (e.g. {top_matched}).")
         
     # Global Quality Base (Tie-breaker for overall goodness)
     global_diff = cand_avg_score - 7.0
@@ -413,7 +413,7 @@ def content_based_heuristic_scorer_manga(candidate, profile):
         implicit_tag_score = min(implicit_tag_score, 2.0)
         score += implicit_tag_score
         top_matched = ", ".join(matched_tags[:3])
-        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (es. {top_matched}).")
+        explanations.append(f"🎭 Similar Themes (+{implicit_tag_score:.2f}): Shares strong themes with your favorites (e.g. {top_matched}).")
         
     global_diff = cand_avg_score - 7.0
     global_bonus = global_diff * 0.3

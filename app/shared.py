@@ -1,19 +1,44 @@
-import streamlit as st
+import html
 import json
 import re
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
+import joblib
+import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = ROOT_DIR / "models"
 CACHE_DIR = ROOT_DIR / "cache"
+DATA_DIR = ROOT_DIR / "data"
+APP_NAME = "AniList Score Predictor UNOFFICIAL"
+APP_DISCLAIMER = (
+    "Data sourced from the AniList GraphQL API. This project is unofficial and is not "
+    "affiliated with or endorsed by AniList. Anime and manga titles, cover images, and "
+    "descriptions remain the property of their respective owners."
+)
+APP_SCOPE_NOTE = (
+    "This application is an analytics and prediction companion for AniList data. It is not "
+    "a replacement list-tracker service and does not modify AniList accounts or lists."
+)
+DATA_SOURCE_URL = "https://anilist.co"
+API_DOCS_URL = "https://anilist.gitbook.io/anilist-apiv2-docs"
+CACHE_RETENTION_HOURS = 6
+DATA_RETENTION_DAYS = 7
+MODEL_RETENTION_DAYS = 7
+
+MAX_USERNAME_LEN = 50
+MAX_SEARCH_LEN = 100
+MAX_TAG_LEN = 50
+MAX_STUDIO_LEN = 100
+MAX_YEAR_LEN = 4
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,50}$")
+USERNAME_VALIDATION_MESSAGE = "Username can only contain letters, numbers, underscores, and hyphens."
 
 CUSTOM_CSS = """
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-    
     .stApp {
-        font-family: 'Inter', sans-serif;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     }
     
     .metric-card {
@@ -121,6 +146,17 @@ CUSTOM_CSS = """
         font-weight: 500;
         margin-bottom: 0.5rem;
     }
+
+    .legal-footer {
+        margin-top: 2rem;
+        padding: 1rem 1.1rem;
+        border-top: 1px solid rgba(255,255,255,0.08);
+        color: #b9bfd0;
+        font-size: 0.92rem;
+        line-height: 1.55;
+        background: rgba(255,255,255,0.02);
+        border-radius: 14px;
+    }
 </style>
 """
 
@@ -129,7 +165,89 @@ AUTO_TRAIN_DAYS = 7
 def inject_css():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
+
+def purge_expired_runtime_artifacts():
+    """Delete stale local artifacts to reduce retention of AniList-derived user data."""
+    retention_rules = (
+        (CACHE_DIR, CACHE_RETENTION_HOURS * 3600),
+        (DATA_DIR, DATA_RETENTION_DAYS * 86400),
+        (MODELS_DIR, MODEL_RETENTION_DAYS * 86400),
+    )
+    now_ts = datetime.now().timestamp()
+    for directory, max_age_seconds in retention_rules:
+        if not directory.exists():
+            continue
+        for path in directory.glob("*"):
+            if not path.is_file():
+                continue
+            try:
+                age_seconds = now_ts - path.stat().st_mtime
+                if age_seconds > max_age_seconds:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                continue
+
+
+def normalize_limited_text(value, max_len):
+    return str(value or "").strip()[:max_len]
+
+
+def is_valid_username(username):
+    return bool(USERNAME_PATTERN.fullmatch(username))
+
+
+def _resolve_safe_path(base_dir: Path, filename: str) -> Path:
+    base_resolved = base_dir.resolve()
+    candidate = (base_resolved / filename).resolve()
+    if candidate.parent != base_resolved:
+        raise ValueError("Invalid path outside the expected directory.")
+    return candidate
+
+
+def get_model_path(username: str, is_manga: bool = False) -> Path:
+    suffix = "_manga_best_model.pkl" if is_manga else "_best_model.pkl"
+    return _resolve_safe_path(MODELS_DIR, f"{username.lower()}{suffix}")
+
+
+def get_dataset_path(username: str, is_manga: bool = False) -> Path:
+    suffix = "_manga_clean.csv" if is_manga else "_clean.csv"
+    return _resolve_safe_path(DATA_DIR, f"{username.lower()}{suffix}")
+
+
+def safe_load_model_artifact(username: str, is_manga: bool = False):
+    model_path = get_model_path(username, is_manga=is_manga)
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model artifact not found: {model_path.name}")
+    return joblib.load(model_path)
+
+
+def delete_local_user_artifacts(username: str):
+    """Remove local cache, dataset, and model files for one username."""
+    normalized = str(username or "").strip().lower()
+    if not normalized:
+        return
+
+    patterns = (
+        CACHE_DIR / f"user_list_{normalized}.json",
+        CACHE_DIR / f"user_manga_list_{normalized}.json",
+        CACHE_DIR / f"user_activity_anime_{normalized}.json",
+        CACHE_DIR / f"user_activity_manga_{normalized}.json",
+        DATA_DIR / f"{normalized}_clean.csv",
+        DATA_DIR / f"{normalized}_manga_clean.csv",
+        MODELS_DIR / f"{normalized}_best_model.pkl",
+        MODELS_DIR / f"{normalized}_manga_best_model.pkl",
+    )
+
+    for path in patterns:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+
 def init_session_state():
+    if not st.session_state.get("_runtime_cleanup_done"):
+        purge_expired_runtime_artifacts()
+        st.session_state["_runtime_cleanup_done"] = True
     defaults = {
         "username": "",
         "model_trained_anime": False,
@@ -193,9 +311,24 @@ def render_user_badge():
     """Show the currently logged-in username as a badge on any page."""
     username = st.session_state.get("username", "")
     if username:
-        st.sidebar.markdown(f'<div class="user-badge">👤 {username}</div>', unsafe_allow_html=True)
+        safe_username = html.escape(str(username))
+        st.sidebar.markdown(f'<div class="user-badge">👤 {safe_username}</div>', unsafe_allow_html=True)
     else:
-        st.sidebar.markdown('<div class="user-badge-inactive">👤 Nessun profilo attivo</div>', unsafe_allow_html=True)
+        st.sidebar.markdown('<div class="user-badge-inactive">👤 No active profile</div>', unsafe_allow_html=True)
+
+
+def render_app_disclaimer():
+    st.markdown(
+        f"""
+        <div class="legal-footer">
+            <strong>{html.escape(APP_NAME)}</strong><br>
+            {html.escape(APP_DISCLAIMER)}<br>
+            {html.escape(APP_SCOPE_NOTE)}<br>
+            Data retention policy: cache up to {CACHE_RETENTION_HOURS} hours; derived datasets and local models up to {DATA_RETENTION_DAYS} days unless removed earlier.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def get_cached_profiles():

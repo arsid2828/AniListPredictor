@@ -88,7 +88,6 @@ def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: b
             creator_str = ", ".join(creators) if creators else ""
             
             row = {
-                'username': username,
                 'mediaId': entry.get('mediaId'),
                 'title': title,
                 'user_score': entry.get('score'),  # Already 0-10 format, 0 means unrated
@@ -213,7 +212,6 @@ def build_user_manga_dataframe(username: str, force_refresh: bool = False, save_
             release_year = start_date.get('year')
             
             row = {
-                'username': username,
                 'mediaId': entry.get('mediaId'),
                 'title': title,
                 'user_score': entry.get('score'),

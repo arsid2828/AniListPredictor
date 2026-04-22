@@ -11,6 +11,19 @@ __pycache__/
 venv/
 .env
 
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Dev and scratch files
+scratch_test.py
+test_api.py
+translate3.py
+italian_strings.txt
+ChatGPT_Prompt_AniListPredictor.txt
+
+# Logs
+*.log
+
 # OS
 .DS_Store
 Thumbs.db

@@ -5,14 +5,16 @@ import time
 from pathlib import Path
 import logging
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-CACHE_TTL_HOURS = 24
+from app.shared import CACHE_RETENTION_HOURS
+
+CACHE_TTL_HOURS = CACHE_RETENTION_HOURS
+REQUEST_TIMEOUT_SECONDS = 30
 
 def _is_cache_valid(cache_path, ttl_hours=CACHE_TTL_HOURS):
     """Check if a cache file exists and is younger than ttl_hours."""
@@ -353,13 +355,14 @@ def fetch_with_retry(query, variables, retries=3):
             response = requests.post(
                 API_URL, 
                 json={"query": query, "variables": variables},
-                headers={"Accept": "application/json", "Content-Type": "application/json"}
+                headers={"Accept": "application/json", "Content-Type": "application/json"},
+                timeout=REQUEST_TIMEOUT_SECONDS
             )
             
             # Rate limiting
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 10))
-                logger.warning(f"Rate limited by AniList. Attempt {attempt+1}/{retries}. Sleeping for {retry_after} seconds...")
+                logger.warning("AniList rate limit hit on attempt %s/%s. Sleeping for %s seconds.", attempt + 1, retries, retry_after)
                 time.sleep(retry_after)
                 continue
                 
@@ -367,16 +370,17 @@ def fetch_with_retry(query, variables, retries=3):
             data = response.json()
             
             if "errors" in data:
-                logger.error(f"GraphQL Errors: {data['errors']}")
-                raise ValueError(f"GraphQL Error: {data['errors'][0].get('message', 'Unknown')}")
+                error_message = data["errors"][0].get("message", "Unknown")
+                logger.warning("AniList GraphQL returned an error: %s", error_message)
+                raise ValueError(f"GraphQL Error: {error_message}")
                 
             return data["data"]
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Request failed: {e}")
+            logger.warning("AniList request failed on attempt %s/%s: %s", attempt + 1, retries, e)
             if attempt < retries - 1:
                 sleep_time = 2 ** attempt
-                logger.info(f"Retrying in {sleep_time} seconds...")
+                logger.debug("Retrying AniList request in %s seconds.", sleep_time)
                 time.sleep(sleep_time)
             else:
                 raise e
@@ -390,11 +394,11 @@ def fetch_user_anime_list(username: str, force_refresh: bool = False):
     cache_path = CACHE_DIR / f"user_list_{username.lower()}.json"
     
     if not force_refresh and _is_cache_valid(cache_path):
-        logger.info(f"Loading cached anime list for {username}")
+        logger.debug("Loading cached anime list for %s.", username)
         with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
             
-    logger.info(f"Fetching anime list for user: {username}")
+    logger.debug("Fetching anime list for %s.", username)
     all_lists = {}
     chunk = 1
     has_next_chunk = True
@@ -405,12 +409,12 @@ def fetch_user_anime_list(username: str, force_refresh: bool = False):
             "chunk": chunk
         }
         
-        logger.info(f"Requesting chunk {chunk}...")
+        logger.debug("Requesting anime list chunk %s.", chunk)
         try:
             data = fetch_with_retry(USER_LIST_QUERY, variables)
         except ValueError as e:
             if "User not found" in str(e) or "private" in str(e).lower():
-                logger.error(f"Cannot fetch data for {username}: Profile might be private or non-existent.")
+                logger.warning("Cannot fetch anime list because the profile is unavailable or private.")
                 return None
             raise
             
@@ -442,7 +446,7 @@ def fetch_user_anime_list(username: str, force_refresh: bool = False):
 def search_anime_by_title(title: str):
     """Search for an anime by title, returns top 10 matches."""
     variables = {"search": title}
-    logger.info(f"Searching for anime: {title}")
+    logger.debug("Searching anime title.")
     data = fetch_with_retry(ANIME_SEARCH_QUERY, variables)
     return data.get("Page", {}).get("media", [])
 
@@ -457,7 +461,7 @@ def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None,
     
     unique_candidates = {}
     
-    logger.info(f"Fetching anime candidates (limit={limit}, genre={genre}, tag={tag}, year={year})...")
+    logger.debug("Fetching anime candidates with limit=%s.", limit)
     
     base_vars = {}
     if genre: base_vars["genre"] = genre
@@ -487,23 +491,23 @@ def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None,
 def fetch_user_manga_list(username: str, force_refresh: bool = False):
     cache_path = CACHE_DIR / f"user_manga_list_{username.lower()}.json"
     if not force_refresh and _is_cache_valid(cache_path):
-        logger.info(f"Loading cached manga list for {username}")
+        logger.debug("Loading cached manga list for %s.", username)
         with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
             
-    logger.info(f"Fetching manga list for user: {username}")
+    logger.debug("Fetching manga list for %s.", username)
     all_lists = {}
     chunk = 1
     has_next_chunk = True
     
     while has_next_chunk:
         variables = {"userName": username, "chunk": chunk}
-        logger.info(f"Requesting manga chunk {chunk}...")
+        logger.debug("Requesting manga list chunk %s.", chunk)
         try:
             data = fetch_with_retry(USER_MANGA_LIST_QUERY, variables)
         except ValueError as e:
             if "User not found" in str(e) or "private" in str(e).lower():
-                logger.error(f"Cannot fetch manga data for {username}: Profile might be private or non-existent.")
+                logger.warning("Cannot fetch manga list because the profile is unavailable or private.")
                 return None
             raise
             
@@ -529,7 +533,7 @@ def fetch_user_manga_list(username: str, force_refresh: bool = False):
 
 def search_manga_by_title(title: str):
     variables = {"search": title}
-    logger.info(f"Searching for manga: {title}")
+    logger.debug("Searching manga title.")
     data = fetch_with_retry(MANGA_SEARCH_QUERY, variables)
     return data.get("Page", {}).get("media", [])
 
@@ -540,7 +544,7 @@ def get_candidate_manga_for_recommendations(limit: int = 500, genre: str = None,
     
     unique_candidates = {}
     
-    logger.info(f"Fetching manga candidates (limit={limit}, genre={genre}, tag={tag})...")
+    logger.debug("Fetching manga candidates with limit=%s.", limit)
     
     base_vars = {}
     if genre: base_vars["genre"] = genre
@@ -597,11 +601,11 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
     cache_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
     
     if not force_refresh and _is_cache_valid(cache_path):
-        logger.info(f"Loading cached activity history for {username} ({media_type})")
+        logger.debug("Loading cached activity history for %s (%s).", username, media_type)
         with open(cache_path, 'r', encoding='utf-8') as f:
             return json.load(f)
             
-    logger.info(f"Fetching user ID for {username}")
+    logger.debug("Fetching AniList user ID.")
     try:
         data = fetch_with_retry(USER_ID_QUERY, {"name": username})
         user_id = data.get("User", {}).get("id")
@@ -615,7 +619,7 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
     page = 1
     has_next = True
     
-    logger.info(f"Fetching activity history for user: {username} (ID: {user_id})")
+    logger.debug("Fetching activity history for %s.", username)
     
     while has_next and page <= 200:  # Max 10,000 activities limitation to avoid infinite loop
         variables = {"userId": user_id, "page": page, "type": f"{media_type.upper()}_LIST"}
@@ -639,7 +643,6 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
     return activities
 
 if __name__ == "__main__":
-    # Test script locally
-    username = "arsid"  # Test with an example username or yours
-    # data = fetch_user_anime_list(username)
-    # print(f"Fetched list chunks: {len(data) if data else 0}")
+    test_username = os.environ.get("TEST_USERNAME", "example_user")
+    data = fetch_user_anime_list(test_username)
+    print(f"Fetched list chunks: {len(data) if data else 0}")

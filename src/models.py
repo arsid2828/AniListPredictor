@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 import joblib
+import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -384,22 +385,20 @@ def _core_train_pipeline(X, y, use_optuna=True):
         'optuna_result': optuna_result,
         'tscv_scores': tscv_scores,
         'fallback_recommended': fallback_recommended,
-        'X_train_sample': X_train_val.sample(min(50, len(X_train_val)), random_state=42),
     }
 
 def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dict[str, Any]:
     """Runs the entire ANIME pipeline for a username."""
     df_raw = build_user_dataframe(username, force_refresh=True, save_csv=True)
     if df_raw.empty:
-        return {"status": "error", "message": f"Nessun dato trovato per {username}."}
+        return {"status": "error", "message": f"No data found for {username}."}
     if len(df_raw) < MIN_DATASET_SIZE:
-        return {"status": "fallback", "message": f"Solo {len(df_raw)} anime valutati. Troppo pochi per il ML — usa il Cold Start."}
+        return {"status": "fallback", "message": f"Only {len(df_raw)} rated anime found. Too few for ML - use Cold Start."}
     
     X, y = engineer_features(df_raw)
     result = _core_train_pipeline(X, y, use_optuna=use_optuna)
     
     model_artifact = {
-        'username': username,
         'model_name': result['model_name'],
         'model': result['model'],
         'train_columns': result['train_columns'],
@@ -411,7 +410,6 @@ def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dic
         'fallback_recommended': result['fallback_recommended'],
         'trained_at': pd.Timestamp.now().isoformat(),
         'dataset_size': len(df_raw),
-        'X_train_sample': result['X_train_sample'],
     }
     
     artifact_path = MODELS_DIR / f"{username.lower()}_best_model.pkl"
@@ -424,15 +422,14 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) 
     """Runs the entire MANGA pipeline for a username."""
     df_raw = build_user_manga_dataframe(username, force_refresh=True, save_csv=True)
     if df_raw.empty:
-        return {"status": "error", "message": f"Nessun dato manga trovato per {username}."}
+        return {"status": "error", "message": f"No manga data found for {username}."}
     if len(df_raw) < MIN_DATASET_SIZE:
-        return {"status": "fallback", "message": f"Solo {len(df_raw)} manga valutati. Troppo pochi per il ML — usa il Cold Start."}
+        return {"status": "fallback", "message": f"Only {len(df_raw)} rated manga found. Too few for ML - use Cold Start."}
     
     X, y = engineer_manga_features(df_raw)
     result = _core_train_pipeline(X, y, use_optuna=use_optuna)
     
     model_artifact = {
-        'username': username,
         'model_name': result['model_name'],
         'model': result['model'],
         'train_columns': result['train_columns'],
@@ -444,7 +441,6 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) 
         'fallback_recommended': result['fallback_recommended'],
         'trained_at': pd.Timestamp.now().isoformat(),
         'dataset_size': len(df_raw),
-        'X_train_sample': result['X_train_sample'],
     }
     
     artifact_path = MODELS_DIR / f"{username.lower()}_manga_best_model.pkl"
@@ -454,7 +450,8 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) 
     return model_artifact
 
 if __name__ == "__main__":
-    result = train_and_evaluate_all_models("arsid")
+    test_username = os.environ.get("TEST_USERNAME", "example_user")
+    result = train_and_evaluate_all_models(test_username)
     if 'metrics' in result:
         print(pd.DataFrame(result['metrics']).to_string(index=False))
         print(f"\nBest: {result['model_name']}")

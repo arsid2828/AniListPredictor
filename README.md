@@ -1,6 +1,6 @@
-# 🎬 AniList AI Predictor 🧠
+# 🎬 AniList Score Predictor UNOFFICIAL 🧠
 
-Un ecosistema di Machine Learning ibrido all-in-one progettato per analizzare, profilare e prevedere matematicamente i voti che un utente darà a **Anime** e **Manga** su [AniList](https://anilist.co/).
+An unofficial Machine Learning app designed to analyze, profile, and predict the scores a user may give to **Anime** and **Manga** on [AniList](https://anilist.co/).
 
 Il progetto si è evoluto da un semplice regressore a una suite completa di **BI (Business Intelligence) per Otaku**, integrando modelli di stato dell'arte, spiegabilità (XAI) e analytics profonde, con un'interfaccia utente (UI) completamente in lingua inglese.
 
@@ -90,4 +90,4 @@ Non ci accontentiamo di capire se l'algoritmo predice '8.5', ma **perché lo fa*
 I dati vengono salvati localmente nelle cartelle `cache/` (in formato leggero JSON) e `data/` (come pesanti dataset in ML CSV). La cache dell'API scade automaticamente ogni **24 ore** per garantirti dati sempre aggiornati senza sovraccaricare i server di AniList.
 
 ---
-*Sviluppato con ❤️ per la community di AniList.*
+This project is unofficial and is not affiliated with or endorsed by AniList. Data is sourced from the AniList GraphQL API. Anime and manga titles, descriptions, cover images, and related metadata remain the property of their respective owners.
