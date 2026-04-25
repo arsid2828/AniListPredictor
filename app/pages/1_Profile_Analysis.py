@@ -112,7 +112,7 @@ with col_hist:
         line_color="#f2994a",
         annotation_text=f"Average: {df['user_score'].mean():.2f}",
     )
-    st.plotly_chart(fig_hist, use_container_width=True)
+    st.plotly_chart(fig_hist, width="stretch")
 
 with col_box:
     fig_box = px.box(
@@ -123,7 +123,7 @@ with col_box:
         labels={"user_score": "User Score"},
     )
     fig_box.update_layout(template="plotly_dark", height=350)
-    st.plotly_chart(fig_box, use_container_width=True)
+    st.plotly_chart(fig_box, width="stretch")
 
 st.markdown("---")
 timeline = compute_score_timeline(df)
@@ -158,7 +158,7 @@ if not timeline.empty:
         height=400,
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    st.plotly_chart(fig_timeline, width="stretch")
 
 st.markdown("---")
 col_radar, col_genre_bar = st.columns(2)
@@ -185,7 +185,7 @@ if not genre_stats.empty:
                 template="plotly_dark",
                 height=450,
             )
-            st.plotly_chart(fig_radar, use_container_width=True)
+            st.plotly_chart(fig_radar, width="stretch")
 
     with col_genre_bar:
         fig_genre = px.bar(
@@ -199,7 +199,7 @@ if not genre_stats.empty:
             labels={"mean_score": "Average Score", "genre": "Genre", "count": "No. of Titles"},
         )
         fig_genre.update_layout(template="plotly_dark", height=450, yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(fig_genre, use_container_width=True)
+        st.plotly_chart(fig_genre, width="stretch")
 
 st.markdown("---")
 st.markdown(f"### 🏆 Top 10 Favorite Franchises ({media_label})")
@@ -225,7 +225,7 @@ if not franchise_stats.empty:
     fig_franchise.update_traces(
         hovertemplate="<b>%{y}</b><br>Final Score: %{x:.2f}<br>Average Score: %{customdata[0]:.2f}<br>Total Entries Watched/Read: %{customdata[1]}<br>Total Episodes/Chapters: %{customdata[2]}<extra></extra>"
     )
-    st.plotly_chart(fig_franchise, use_container_width=True)
+    st.plotly_chart(fig_franchise, width="stretch")
 
     with st.expander("ℹ️ How is the franchise score calculated?"):
         st.markdown(
@@ -260,7 +260,7 @@ if not studio_stats.empty:
         labels={"mean_score": "Average Score", "name": entity_label, "count": "No. of Titles"},
     )
     fig_studio.update_layout(template="plotly_dark", height=450, yaxis={"categoryorder": "total ascending"})
-    st.plotly_chart(fig_studio, use_container_width=True)
+    st.plotly_chart(fig_studio, width="stretch")
 
 if "seasonYear" in df.columns or "releaseYear" in df.columns:
     st.markdown("---")
@@ -282,6 +282,6 @@ if "seasonYear" in df.columns or "releaseYear" in df.columns:
                 labels={year_col: "Year", "mean_score": "Average Score", "count": "No. of Titles"},
             )
             fig_year.update_layout(template="plotly_dark", height=350)
-            st.plotly_chart(fig_year, use_container_width=True)
+            st.plotly_chart(fig_year, width="stretch")
 
 render_app_disclaimer()

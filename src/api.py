@@ -580,9 +580,11 @@ query ($userId: Int, $page: Int, $type: ActivityType) {
         status
         media {
           title { romaji english }
+          format
           episodes
           chapters
           duration
+          countryOfOrigin
         }
       }
     }
@@ -596,14 +598,39 @@ query ($name: String) {
 }
 """
 
+def _load_cached_json_list(cache_path: Path):
+    if not cache_path.exists():
+        return []
+    try:
+        with open(cache_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        logger.warning("Failed to read cached JSON list from %s.", cache_path.name, exc_info=True)
+        return []
+
+
+def _merge_activities_preserving_latest(cached_activities, new_activities):
+    merged_by_id = {}
+    for act in new_activities + cached_activities:
+        act_id = act.get("id")
+        if act_id is None:
+            continue
+        if act_id not in merged_by_id:
+            merged_by_id[act_id] = act
+    merged = list(merged_by_id.values())
+    merged.sort(key=lambda item: item.get("id", 0), reverse=True)
+    return merged
+
+
 def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_refresh: bool = False):
     """Fetch user's activity history (anime or manga) from AniList."""
     cache_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
+    cached_activities = _load_cached_json_list(cache_path)
     
     if not force_refresh and _is_cache_valid(cache_path):
         logger.debug("Loading cached activity history for %s (%s).", username, media_type)
-        with open(cache_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return cached_activities
             
     logger.debug("Fetching AniList user ID.")
     try:
@@ -616,8 +643,10 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
         return None
         
     activities = []
+    cached_ids = {act.get("id") for act in cached_activities if act.get("id") is not None}
     page = 1
     has_next = True
+    reached_cached_boundary = False
     
     logger.debug("Fetching activity history for %s.", username)
     
@@ -631,16 +660,29 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
             
         page_info = data.get("Page", {}).get("pageInfo", {})
         acts = data.get("Page", {}).get("activities", [])
-        
-        activities.extend(acts)
+
+        if not acts:
+            break
+
+        for act in acts:
+            act_id = act.get("id")
+            if act_id in cached_ids:
+                reached_cached_boundary = True
+                break
+            activities.append(act)
+
         has_next = page_info.get("hasNextPage", False)
+        if reached_cached_boundary:
+            break
         page += 1
         time.sleep(0.5)
-        
+
+    merged_activities = _merge_activities_preserving_latest(cached_activities, activities)
+
     with open(cache_path, 'w', encoding='utf-8') as f:
-        json.dump(activities, f, ensure_ascii=False, indent=2)
+        json.dump(merged_activities, f, ensure_ascii=False, indent=2)
         
-    return activities
+    return merged_activities
 
 if __name__ == "__main__":
     test_username = os.environ.get("TEST_USERNAME", "example_user")

@@ -52,7 +52,7 @@ if user1_clean and not is_valid_username(user1_clean):
 if user2_clean and not is_valid_username(user2_clean):
     st.warning(USERNAME_VALIDATION_MESSAGE)
 
-if user1_clean and user2_clean and st.button("🔍 Calculate Compatibility", use_container_width=True):
+if user1_clean and user2_clean and st.button("🔍 Calculate Compatibility", width="stretch"):
     if not is_valid_username(user1_clean) or not is_valid_username(user2_clean):
         st.stop()
 
@@ -119,7 +119,7 @@ if user1_clean and user2_clean and st.button("🔍 Calculate Compatibility", use
             )
         )
         fig_gauge.update_layout(height=300, template="plotly_dark")
-        st.plotly_chart(fig_gauge, use_container_width=True)
+        st.plotly_chart(fig_gauge, width="stretch")
 
     with stats_col:
         st.markdown(f"### {compat_text}")
@@ -162,7 +162,7 @@ if user1_clean and user2_clean and st.button("🔍 Calculate Compatibility", use
         xaxis=dict(range=[0, 10.5]),
         yaxis=dict(range=[0, 10.5]),
     )
-    st.plotly_chart(fig_scatter, use_container_width=True)
+    st.plotly_chart(fig_scatter, width="stretch")
 
     common_df["diff"] = (common_df["user_score_1"] - common_df["user_score_2"]).abs()
     common_df = common_df.sort_values("diff", ascending=False)

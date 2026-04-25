@@ -128,14 +128,14 @@ if mode == "AniList Profile (Machine Learning)":
         col_load, col_train = st.columns(2)
         
         with col_load:
-            if st.button("📂 Load", use_container_width=True, disabled=not (model_path and model_path.exists())):
+            if st.button("📂 Load", width="stretch", disabled=not (model_path and model_path.exists())):
                 st.session_state["username"] = username_lower
                 st.session_state[model_trained_key] = True
                 st.rerun()
                 
         with col_train:
             btn_label = "🔥 Train/Retrain"
-            if st.button(btn_label, use_container_width=True, disabled=not (username_lower and username_valid)):
+            if st.button(btn_label, width="stretch", disabled=not (username_lower and username_valid)):
                 last_train_key = f"last_train_{'manga' if is_manga else 'anime'}_{username_lower}"
                 remaining = get_remaining_cooldown(last_train_key, TRAIN_COOLDOWN_SECONDS)
                 if remaining > 0:
@@ -169,7 +169,7 @@ if mode == "AniList Profile (Machine Learning)":
 
         if username_lower:
             st.markdown("---")
-            if st.button("🗑️ Delete Local User Data", use_container_width=True):
+            if st.button("🗑️ Delete Local User Data", width="stretch"):
                 delete_local_user_artifacts(username_lower)
                 if st.session_state.get("username", "").lower() == username_lower:
                     st.session_state["model_trained_anime"] = False
@@ -227,9 +227,9 @@ if mode == "AniList Profile (Machine Learning)":
                         color_continuous_scale='RdYlGn_r',
                         title="MAE Comparison between Models (lower = better)")
             fig.update_layout(xaxis_tickangle=-45, height=400, template='plotly_dark')
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             
-            st.dataframe(metrics_df, use_container_width=True)
+            st.dataframe(metrics_df, width="stretch")
             
             if model_artifact.get('feature_importance'):
                 fi_df = pd.DataFrame(model_artifact['feature_importance'])
@@ -237,7 +237,7 @@ if mode == "AniList Profile (Machine Learning)":
                                title="Top Feature Importances", color='Importance',
                                color_continuous_scale='Viridis')
                 fig_fi.update_layout(height=500, template='plotly_dark', yaxis={'categoryorder': 'total ascending'})
-                st.plotly_chart(fig_fi, use_container_width=True)
+                st.plotly_chart(fig_fi, width="stretch")
             
             if model_artifact.get('optuna_result'):
                 st.write("**Optuna Tuning:**", model_artifact['optuna_result'])
@@ -300,7 +300,7 @@ if mode == "AniList Profile (Machine Learning)":
         
         rec_col1, rec_col2 = st.columns([3, 1])
         with rec_col1:
-            rec_btn = st.button(f"✨ Generate {media_label} Recommendations", use_container_width=True)
+            rec_btn = st.button(f"✨ Generate {media_label} Recommendations", width="stretch")
         
         candidate_limit = max(10, min(int(candidate_limit), 1000))
         if rec_btn:
@@ -384,7 +384,7 @@ if mode == "AniList Profile (Machine Learning)":
                 title = cand['title'].get('english') or cand['title'].get('romaji')
                 col_img, col_txt = st.columns([1, 6])
                 with col_img:
-                    st.image(cand.get('coverImage', {}).get('large') or "", use_container_width=True)
+                    st.image(cand.get('coverImage', {}).get('large') or "", width="stretch")
                 with col_txt:
                     st.markdown(f"#### #{i+1} : {title} ⭐️ {pred:.2f} / 10")
                     if is_manga:
@@ -469,7 +469,7 @@ if mode == "AniList Profile (Machine Learning)":
                     
                     col_img, col_txt = st.columns([1, 4])
                     with col_img:
-                        st.image(top_media.get('coverImage', {}).get('large') or "", use_container_width=True)
+                        st.image(top_media.get('coverImage', {}).get('large') or "", width="stretch")
                     with col_txt:
                         hist_mean = user_history_df['user_score'].mean()
                         glob_mean = (top_media.get('averageScore') or 0) / 10.0
@@ -496,7 +496,7 @@ if mode == "AniList Profile (Machine Learning)":
                                 yaxis={'categoryorder': 'total ascending'},
                                 xaxis_title="SHAP Impact (+ = raises score, - = lowers score)"
                             )
-                            st.plotly_chart(fig_shap, use_container_width=True)
+                            st.plotly_chart(fig_shap, width="stretch")
                     
     else:
         st.info("👈 Enter a username and train models from the sidebar to start!")
@@ -592,7 +592,7 @@ elif mode == "New User (Cold Start)":
                 help="The more candidates you select, the more accurate the search, but it will take longer."
             )
         with cs_btn_col:
-            if st.button("🔄 Generate / Update", use_container_width=True):
+            if st.button("🔄 Generate / Update", width="stretch"):
                 if rec_key in st.session_state:
                     del st.session_state[rec_key]
                 st.rerun()
@@ -610,7 +610,7 @@ elif mode == "New User (Cold Start)":
             title = cand['title'].get('english') or cand['title'].get('romaji')
             col_img, col_txt = st.columns([1, 6])
             with col_img:
-                st.image(cand.get('coverImage', {}).get('large') or "", use_container_width=True)
+                st.image(cand.get('coverImage', {}).get('large') or "", width="stretch")
             with col_txt:
                 st.markdown(f"#### #{i+1} : {title}")
                 st.markdown(f"**Estimated Affinity**: 🚀 `{pred:.2f} / 10`")
@@ -657,7 +657,7 @@ elif mode == "New User (Cold Start)":
                     st.success(f"### Estimated Score: {score:.2f} / 10")
                     colImg, colTxt = st.columns([1, 4])
                     with colImg:
-                        st.image(top_media.get('coverImage', {}).get('large') or "", use_container_width=True)
+                        st.image(top_media.get('coverImage', {}).get('large') or "", width="stretch")
                     with colTxt:
                         st.subheader("💡 Why?")
                         for expl in explanations:

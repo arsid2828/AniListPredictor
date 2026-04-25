@@ -94,7 +94,7 @@ with col_right:
             if img2:
                 st.image(img2, width=200)
 
-if selected_1 and selected_2 and st.button("⚡ Compare!", use_container_width=True):
+if selected_1 and selected_2 and st.button("⚡ Compare!", width="stretch"):
     with st.spinner("Calculating predictions and SHAP..."):
         if is_manga:
             x1 = build_manga_inference_features(selected_1, user_history_df, train_columns)
@@ -155,7 +155,7 @@ if selected_1 and selected_2 and st.button("⚡ Compare!", use_container_width=T
                 ],
             }
         )
-        st.dataframe(comp_df, use_container_width=True, hide_index=True)
+        st.dataframe(comp_df, width="stretch", hide_index=True)
 
         shap1, _ = get_shap_explanation(model, x1)
         shap2, _ = get_shap_explanation(model, x2)
@@ -185,7 +185,7 @@ if selected_1 and selected_2 and st.button("⚡ Compare!", use_container_width=T
                         template="plotly_dark",
                         yaxis={"categoryorder": "total ascending"},
                     )
-                    st.plotly_chart(fig_s1, use_container_width=True)
+                    st.plotly_chart(fig_s1, width="stretch")
 
             if shap_df2 is not None and not shap_df2.empty:
                 with shap_col2:
@@ -204,6 +204,6 @@ if selected_1 and selected_2 and st.button("⚡ Compare!", use_container_width=T
                         template="plotly_dark",
                         yaxis={"categoryorder": "total ascending"},
                     )
-                    st.plotly_chart(fig_s2, use_container_width=True)
+                    st.plotly_chart(fig_s2, width="stretch")
 
 render_app_disclaimer()

@@ -324,7 +324,35 @@ def mean_absolute_error(y1, y2):
 
 # ========== ACTIVITY ANALYTICS ==========
 
-def compute_activity_stats(activities, media_type="ANIME"):
+def _get_activity_equivalent_units(media, progress_units, media_type, anime_reference_minutes=24.0):
+    """Normalize activity units to an anime-episode-equivalent scale."""
+    if media_type == "ANIME":
+        duration = media.get("duration") or 24
+        return progress_units * (float(duration) / anime_reference_minutes)
+
+    media_format = str(media.get("format") or "").upper()
+    country = str(media.get("countryOfOrigin") or "").upper()
+
+    # Heuristic weights tuned for readability:
+    # - JP manga chapter: around 15-25 pages and anime often adapts ~2-3 chapters per TV episode
+    # - KR/CN web chapters are usually longer/denser in scrolling format, so they count a bit more
+    # - Novel chapters are prose and usually slower to read
+    # - One-shots are often a full self-contained short work in one chapter
+    if media_format == "NOVEL":
+        chapters_per_episode = 1.5
+    elif media_format == "ONE_SHOT":
+        chapters_per_episode = 1.0
+    elif country == "KR":
+        chapters_per_episode = 2.0
+    elif country == "CN":
+        chapters_per_episode = 2.0
+    else:
+        chapters_per_episode = 2.5
+
+    return progress_units / chapters_per_episode
+
+
+def compute_activity_stats(activities, media_type="ANIME", anime_reference_minutes=24.0):
     """Compute analytical stats from a user's activity history."""
     if not activities:
         return None
@@ -336,7 +364,8 @@ def compute_activity_stats(activities, media_type="ANIME"):
         st = act.get('status')
         if st in valid_statuses:
             dt = datetime.fromtimestamp(act['createdAt'])
-            dur = act.get('media', {}).get('duration') or 0
+            media = act.get('media', {}) or {}
+            dur = media.get('duration') or 0
             if media_type == "MANGA":
                 dur = 5
                 
@@ -352,8 +381,14 @@ def compute_activity_stats(activities, media_type="ANIME"):
                 except ValueError:
                     pass
             
-            title_dict = act.get('media', {}).get('title', {})
+            title_dict = media.get('title', {})
             t_str = title_dict.get('english') or title_dict.get('romaji') or "Unknown"
+            equivalent_units = _get_activity_equivalent_units(
+                media,
+                ep,
+                media_type=media_type,
+                anime_reference_minutes=anime_reference_minutes,
+            )
             
             rows.append({
                 'date': dt.date(),
@@ -361,6 +396,10 @@ def compute_activity_stats(activities, media_type="ANIME"):
                 'year': str(dt.year),
                 'duration_hours': (dur * ep) / 60.0,
                 'episodes': ep,
+                'equivalent_units': equivalent_units,
+                'media_type': media_type,
+                'media_format': str(media.get('format') or '').upper(),
+                'country_of_origin': str(media.get('countryOfOrigin') or '').upper(),
                 'title': t_str
             })
             
@@ -370,12 +409,21 @@ def compute_activity_stats(activities, media_type="ANIME"):
     df = pd.DataFrame(rows)
     
     # By month
-    month_stats = df.groupby('month').agg({'episodes': 'sum', 'duration_hours': 'sum'}).reset_index().sort_values('month')
+    month_stats = df.groupby('month').agg({
+        'episodes': 'sum',
+        'equivalent_units': 'sum',
+        'duration_hours': 'sum'
+    }).reset_index().sort_values('month')
     # By year
-    year_stats = df.groupby('year').agg({'episodes': 'sum', 'duration_hours': 'sum'}).reset_index().sort_values('year')
+    year_stats = df.groupby('year').agg({
+        'episodes': 'sum',
+        'equivalent_units': 'sum',
+        'duration_hours': 'sum'
+    }).reset_index().sort_values('year')
     # Max day
     day_stats = df.groupby('date').agg({
         'episodes': 'sum', 
+        'equivalent_units': 'sum',
         'duration_hours': 'sum',
         'title': lambda x: list(set(x))
     }).reset_index()
@@ -388,9 +436,11 @@ def compute_activity_stats(activities, media_type="ANIME"):
     return {
         'month_stats': month_stats,
         'year_stats': year_stats,
+        'rows': df,
         'max_day': {
             'date': str(max_day_row['date']),
             'episodes': int(max_day_row['episodes']),
+            'equivalent_units': round(float(max_day_row['equivalent_units']), 2),
             'hours': float(max_day_row['duration_hours']),
             'titles': max_day_row['title']
         }
