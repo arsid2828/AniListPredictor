@@ -45,6 +45,9 @@ query ($userName: String, $chunk: Int) {
         media {
           id
           title { romaji english }
+          coverImage {
+            large
+          }
           format
           episodes
           duration
@@ -218,6 +221,9 @@ query ($userName: String, $chunk: Int) {
         media {
           id
           title { romaji english }
+          coverImage {
+            large
+          }
           format
           chapters
           volumes
