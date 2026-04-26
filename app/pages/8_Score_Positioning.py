@@ -13,7 +13,7 @@ from src.api import CACHE_DIR
 from src.dataset import DATA_DIR
 
 
-ARENA_CSS = """
+PAGE_CSS = """
 <style>
     .arena-cover-frame {
         width: min(100%, 280px);
@@ -36,14 +36,14 @@ ARENA_CSS = """
         object-fit: cover;
         display: block;
     }
-    
+
     .arena-cover-empty {
         color: #9aa3b2;
         font-size: 0.95rem;
         text-align: center;
         padding: 1rem;
     }
-    
+
     .arena-filter-box {
         padding: 1rem 1rem 0.35rem 1rem;
         border: 1px solid rgba(255,255,255,0.08);
@@ -150,24 +150,6 @@ def _load_media_pool(username: str, is_manga: bool):
     return items
 
 
-def _get_state_key(username: str, is_manga: bool, mode: str):
-    suffix = "manga" if is_manga else "anime"
-    return f"arena_{mode}_{suffix}_{username.lower()}"
-
-
-def _seed_stats(items):
-    return {
-        item["id"]: {
-            "wins": 0,
-            "losses": 0,
-            "round_reached": 0,
-            "title": item["title"],
-            "score": float(item.get("score", 0) or 0),
-        }
-        for item in items
-    }
-
-
 def _pool_signature(items):
     return tuple(sorted(item["id"] for item in items))
 
@@ -204,66 +186,46 @@ def _apply_filters(items, score_range, selected_genre, selected_year, selected_t
     return filtered
 
 
-def _init_gauntlet(items):
-    participants = items[:]
-    random.shuffle(participants)
-    stats = _seed_stats(participants)
+def _seed_stats(items):
     return {
-        "mode": "gauntlet",
+        item["id"]: {
+            "wins": 0,
+            "losses": 0,
+            "round_reached": 0,
+            "title": item["title"],
+            "score": float(item.get("score", 0) or 0),
+        }
+        for item in items
+    }
+
+
+def _init_positioning_run(items, anchor_id):
+    anchor_item = next(item for item in items if item["id"] == anchor_id)
+    opponents = [item for item in items if item["id"] != anchor_id]
+    random.shuffle(opponents)
+    participants = [anchor_item] + opponents
+    return {
         "pool_signature": _pool_signature(participants),
         "participants": participants,
-        "stats": stats,
-        "champion_idx": 0,
-        "challenger_idx": 1,
+        "anchor_item": anchor_item,
+        "opponents": opponents,
+        "stats": _seed_stats(participants),
+        "anchor_id": anchor_id,
+        "current_index": 0,
         "history": [],
-        "finished": len(participants) < 2,
+        "finished": len(opponents) < 1,
     }
 
 
-def _build_round(participants):
-    matches = []
-    i = 0
-    while i < len(participants):
-        left = participants[i]
-        right = participants[i + 1] if i + 1 < len(participants) else None
-        matches.append((left, right))
-        i += 2
-    return matches
+def _advance_positioning(state, prefer_anchor: bool):
+    anchor_item = state["anchor_item"]
+    challenger = state["opponents"][state["current_index"]]
+    winner = anchor_item if prefer_anchor else challenger
+    loser = challenger if prefer_anchor else anchor_item
 
-
-def _init_tournament(items):
-    participants = items[:]
-    random.shuffle(participants)
-    stats = _seed_stats(participants)
-    return {
-        "mode": "tournament",
-        "pool_signature": _pool_signature(participants),
-        "round_number": 1,
-        "current_round": _build_round(participants),
-        "match_index": 0,
-        "round_winners": [],
-        "stats": stats,
-        "history": [],
-        "finished": len(participants) < 2,
-        "champion": participants[0]["id"] if len(participants) == 1 else None,
-    }
-
-
-def _record_result(stats, winner, loser, round_number):
-    stats[winner["id"]]["wins"] += 1
-    stats[winner["id"]]["round_reached"] = max(stats[winner["id"]]["round_reached"], round_number)
-    if loser is not None:
-        stats[loser["id"]]["losses"] += 1
-        stats[loser["id"]]["round_reached"] = max(stats[loser["id"]]["round_reached"], round_number - 1)
-
-
-def _advance_gauntlet(state, winner_id):
-    champion = state["participants"][state["champion_idx"]]
-    challenger = state["participants"][state["challenger_idx"]]
-    winner = champion if champion["id"] == winner_id else challenger
-    loser = challenger if winner is champion else champion
-
-    _record_result(state["stats"], winner, loser, len(state["history"]) + 1)
+    state["stats"][winner["id"]]["wins"] += 1
+    state["stats"][winner["id"]]["round_reached"] += 1
+    state["stats"][loser["id"]]["losses"] += 1
     state["history"].append(
         {
             "winner": winner["title"],
@@ -275,48 +237,9 @@ def _advance_gauntlet(state, winner_id):
         }
     )
 
-    if winner is challenger:
-        state["champion_idx"] = state["challenger_idx"]
-
-    state["challenger_idx"] += 1
-    if state["challenger_idx"] >= len(state["participants"]):
+    state["current_index"] += 1
+    if state["current_index"] >= len(state["opponents"]):
         state["finished"] = True
-
-
-def _advance_tournament(state, winner_id):
-    left, right = state["current_round"][state["match_index"]]
-    if right is None:
-        winner = left
-        loser = None
-    else:
-        winner = left if left["id"] == winner_id else right
-        loser = right if winner is left else left
-
-    _record_result(state["stats"], winner, loser, state["round_number"])
-    state["history"].append(
-        {
-            "round": state["round_number"],
-            "winner": winner["title"],
-            "winner_id": winner["id"],
-            "winner_score": float(winner.get("score", 0) or 0),
-            "loser": loser["title"] if loser else "BYE",
-            "loser_id": loser["id"] if loser else None,
-            "loser_score": float(loser.get("score", 0) or 0) if loser else None,
-        }
-    )
-    state["round_winners"].append(winner)
-    state["match_index"] += 1
-
-    if state["match_index"] >= len(state["current_round"]):
-        if len(state["round_winners"]) == 1:
-            state["finished"] = True
-            state["champion"] = state["round_winners"][0]["id"]
-        else:
-            next_round_items = state["round_winners"][:]
-            state["round_number"] += 1
-            state["current_round"] = _build_round(next_round_items)
-            state["match_index"] = 0
-            state["round_winners"] = []
 
 
 def _render_card(item, button_key, label):
@@ -336,7 +259,7 @@ def _render_card(item, button_key, label):
     if item.get("format"):
         meta.append(str(item["format"]))
     if item.get("score"):
-        meta.append(f"User Score: {item['score']:.1f}")
+        meta.append(f"Current Score: {item['score']:.1f}")
     if item.get("year"):
         meta.append(str(item["year"]))
     if item.get("genres"):
@@ -348,53 +271,99 @@ def _render_card(item, button_key, label):
 
 def _render_ranking(state):
     rows = []
-    champion_id = state.get("champion")
-    if state["mode"] == "gauntlet" and state["finished"]:
-        champion_id = state["participants"][state["champion_idx"]]["id"]
-
-    max_stage = max((info["round_reached"] for info in state["stats"].values()), default=0)
-
+    anchor_id = state.get("anchor_id")
     for item_id, info in state["stats"].items():
-        stage = info["round_reached"]
-        if item_id == champion_id:
-            stage_label = "Champion"
-        elif stage <= 0:
-            stage_label = "Opening Round"
-        elif state["mode"] == "tournament":
-            if stage == max_stage - 1 and max_stage >= 2:
-                stage_label = "Finalist"
-            elif stage == max_stage - 2 and max_stage >= 3:
-                stage_label = "Semifinalist"
-            else:
-                stage_label = f"Round {stage}"
+        duel_wins = info["wins"]
+        if item_id == anchor_id:
+            stage_label = "Target title"
+        elif duel_wins <= 0:
+            stage_label = "Eliminated immediately"
         else:
-            duel_wins = info["wins"]
-            if duel_wins <= 0:
-                stage_label = "Eliminated immediately"
-            else:
-                stage_label = f"Won {duel_wins} duel{'s' if duel_wins != 1 else ''}"
+            stage_label = f"Won {duel_wins} duel{'s' if duel_wins != 1 else ''}"
         rows.append(
             {
                 "Title": info["title"],
                 "Wins": info["wins"],
                 "Losses": info["losses"],
                 "Stage": stage_label,
-                "Stage Order": info["wins"] if state["mode"] == "gauntlet" else stage,
-                "Champion": "🏆" if item_id == champion_id else "",
+                "Target": "🎯" if item_id == anchor_id else "",
             }
         )
-    ranking_df = pd.DataFrame(rows).sort_values(["Champion", "Wins", "Stage Order"], ascending=[False, False, False])
-    st.dataframe(ranking_df.drop(columns=["Stage Order"]), width="stretch", hide_index=True)
+    ranking_df = pd.DataFrame(rows).sort_values(["Target", "Wins"], ascending=[False, False])
+    st.dataframe(ranking_df, width="stretch", hide_index=True)
 
 
-st.set_page_config(page_title="Preference Arena", layout="wide", page_icon="🏟️")
+def _render_score_helper(state):
+    anchor_id = state.get("anchor_id")
+    anchor_stats = state["stats"].get(anchor_id)
+    if not anchor_stats:
+        return
+
+    anchor_title = anchor_stats["title"]
+    anchor_score = float(anchor_stats.get("score", 0) or 0)
+    if anchor_score <= 0:
+        return
+
+    tolerance = 0.05
+    beat_higher_scores = []
+    lost_lower_scores = []
+    beat_lower_count = 0
+    lost_higher_count = 0
+    same_score_count = 0
+
+    for row in state["history"]:
+        if row.get("winner_id") == anchor_id:
+            opponent_score = float(row.get("loser_score") or 0)
+            if opponent_score > anchor_score + tolerance:
+                beat_higher_scores.append(opponent_score)
+            elif opponent_score < anchor_score - tolerance:
+                beat_lower_count += 1
+            else:
+                same_score_count += 1
+        elif row.get("loser_id") == anchor_id:
+            opponent_score = float(row.get("winner_score") or 0)
+            if opponent_score < anchor_score - tolerance:
+                lost_lower_scores.append(opponent_score)
+            elif opponent_score > anchor_score + tolerance:
+                lost_higher_count += 1
+            else:
+                same_score_count += 1
+
+    raise_pressure = sum(score - anchor_score for score in beat_higher_scores)
+    lower_pressure = sum(anchor_score - score for score in lost_lower_scores)
+
+    st.markdown("### Score Positioning Helper")
+
+    if raise_pressure > lower_pressure + tolerance:
+        target_score = min(max(beat_higher_scores or [anchor_score]), 10.0)
+        st.info(
+            f"**{anchor_title}** is currently at **{anchor_score:.1f}**. It beat **{len(beat_higher_scores)}** higher-rated title(s) "
+            f"and only lost to lower-rated titles **{len(lost_lower_scores)}** time(s). "
+            f"Suggestion: move it upward toward **{target_score:.1f}**."
+        )
+    elif lower_pressure > raise_pressure + tolerance:
+        target_score = max(min(lost_lower_scores or [anchor_score]), 0.0)
+        st.info(
+            f"**{anchor_title}** is currently at **{anchor_score:.1f}**. It lost to **{len(lost_lower_scores)}** lower-rated title(s) "
+            f"and only beat higher-rated titles **{len(beat_higher_scores)}** time(s). "
+            f"Suggestion: move it downward toward **{target_score:.1f}**."
+        )
+    else:
+        st.info(
+            f"**{anchor_title}** is currently at **{anchor_score:.1f}**. Its results are mostly coherent with your current score: "
+            f"{beat_lower_count} expected win(s) over lower-rated titles, {lost_higher_count} expected loss(es) to higher-rated titles, "
+            f"and {same_score_count} match(es) against similarly rated titles. Suggestion: keep it around **{anchor_score:.1f}**."
+        )
+
+
+st.set_page_config(page_title="Score Positioning", layout="wide", page_icon="🎯")
 inject_css()
-st.markdown(ARENA_CSS, unsafe_allow_html=True)
+st.markdown(PAGE_CSS, unsafe_allow_html=True)
 init_session_state()
 render_user_badge()
 
-st.title("🏟️ Preference Arena")
-st.write("Choose between two titles at a time and build a preference ranking from your own AniList history.")
+st.title("🎯 Score Positioning")
+st.write("Pick one title, compare it against the rest of your filtered list, and use the results to understand whether its current score should go up, down, or stay where it is.")
 
 username = st.session_state.get("username", "")
 if not username:
@@ -405,9 +374,6 @@ media_type = st.radio("Type:", ["🎬 Anime", "📖 Manga"], horizontal=True)
 is_manga = "Manga" in media_type
 media_label = "manga" if is_manga else "anime"
 
-mode_label = st.radio("Mode:", ["Progressive Challenge", "Tournament Bracket"], horizontal=True)
-mode_key = "gauntlet" if "Progressive" in mode_label else "tournament"
-
 pool = _load_media_pool(username, is_manga=is_manga)
 if len(pool) < 2:
     st.warning(f"Not enough rated {media_label} found for {username}.")
@@ -415,7 +381,6 @@ if len(pool) < 2:
     st.stop()
 
 filter_options = _collect_filter_options(pool)
-
 st.markdown('<div class="arena-filter-box">', unsafe_allow_html=True)
 filter_col1, filter_col2, filter_col3, filter_col4 = st.columns(4)
 with filter_col1:
@@ -435,77 +400,63 @@ with filter_col4:
 st.markdown("</div>", unsafe_allow_html=True)
 
 pool = _apply_filters(pool, score_range, selected_genre, selected_year, selected_tag)
-
 if len(pool) < 2:
-    st.warning("The current filters leave fewer than 2 titles. Broaden the filters to start a challenge.")
+    st.warning("The current filters leave fewer than 2 titles. Broaden the filters to start a positioning run.")
     render_app_disclaimer()
     st.stop()
 
 st.caption(f"{len(pool)} rated {media_label} available after filters.")
 
-state_key = _get_state_key(username, is_manga, mode_key)
+anchor_options = {item["title"]: item["id"] for item in sorted(pool, key=lambda x: x["title"].lower())}
+selected_anchor_title = st.selectbox(
+    "Title to position",
+    options=list(anchor_options.keys()),
+    index=0,
+    help="This title starts every duel and is compared against the rest of your filtered pool.",
+)
+selected_anchor_id = anchor_options[selected_anchor_title]
 
-control_col1, control_col2 = st.columns([2, 1])
-with control_col1:
-    st.info(
-        "Progressive Challenge keeps the winner on screen against the next title. "
-        "Tournament Bracket creates a classic 1v1 knockout until the final."
-    )
-with control_col2:
-    if st.button("🔄 Start New Ranking", width="stretch"):
-        st.session_state[state_key] = _init_gauntlet(pool) if mode_key == "gauntlet" else _init_tournament(pool)
-        st.rerun()
+state_key = f"score_positioning_{'manga' if is_manga else 'anime'}_{username.lower()}"
+if st.button("🔄 Start New Positioning Run", width="stretch"):
+    st.session_state[state_key] = _init_positioning_run(pool, selected_anchor_id)
+    st.rerun()
 
 if state_key not in st.session_state:
-    st.session_state[state_key] = _init_gauntlet(pool) if mode_key == "gauntlet" else _init_tournament(pool)
+    st.session_state[state_key] = _init_positioning_run(pool, selected_anchor_id)
 
 state = st.session_state[state_key]
-
-if state["mode"] != mode_key or state.get("pool_signature") != _pool_signature(pool):
-    st.session_state[state_key] = _init_gauntlet(pool) if mode_key == "gauntlet" else _init_tournament(pool)
+if state.get("pool_signature") != _pool_signature(pool) or state.get("anchor_id") != selected_anchor_id:
+    st.session_state[state_key] = _init_positioning_run(pool, selected_anchor_id)
     state = st.session_state[state_key]
 
+_render_score_helper(state)
+
 if not state["finished"]:
-    if mode_key == "gauntlet":
-        left = state["participants"][state["champion_idx"]]
-        right = state["participants"][state["challenger_idx"]]
-        st.subheader(f"Challenge {len(state['history']) + 1} / {len(state['participants']) - 1}")
-    else:
-        left, right = state["current_round"][state["match_index"]]
-        st.subheader(f"Round {state['round_number']} - Match {state['match_index'] + 1} / {len(state['current_round'])}")
-        if right is None:
-            _advance_tournament(state, left["id"])
-            st.rerun()
+    left = state["anchor_item"]
+    right = state["opponents"][state["current_index"]]
+    st.subheader(f"Challenge {state['current_index'] + 1} / {len(state['opponents'])}")
 
     col1, col2 = st.columns(2)
     with col1:
-        pick_left = _render_card(left, f"{state_key}_left_{left['id']}", f"Choose {left['title']}")
+        pick_left = _render_card(left, f"{state_key}_left_{left['id']}_{state['current_index']}", f"Choose {left['title']}")
     with col2:
-        pick_right = _render_card(right, f"{state_key}_right_{right['id']}", f"Choose {right['title']}")
+        pick_right = _render_card(right, f"{state_key}_right_{right['id']}_{state['current_index']}", f"Choose {right['title']}")
 
     if pick_left:
-        if mode_key == "gauntlet":
-            _advance_gauntlet(state, left["id"])
-        else:
-            _advance_tournament(state, left["id"])
+        _advance_positioning(state, prefer_anchor=True)
         st.rerun()
 
     if pick_right:
-        if mode_key == "gauntlet":
-            _advance_gauntlet(state, right["id"])
-        else:
-            _advance_tournament(state, right["id"])
+        _advance_positioning(state, prefer_anchor=False)
         st.rerun()
-
 else:
-    st.success("Ranking complete!")
-    if mode_key == "gauntlet":
-        champion = state["participants"][state["champion_idx"]]
-        st.markdown(f"## 🏆 Final Champion: {champion['title']}")
-    else:
-        champion_id = state.get("champion")
-        champion_title = state["stats"].get(champion_id, {}).get("title", "Unknown")
-        st.markdown(f"## 🏆 Tournament Winner: {champion_title}")
+    st.success("Positioning run complete!")
+    anchor_stats = state["stats"].get(state["anchor_id"], {})
+    st.markdown(
+        f"## 🎯 {state['anchor_item']['title']} finished the run with "
+        f"**{anchor_stats.get('wins', 0)}** preferred duel(s) and **{anchor_stats.get('losses', 0)}** loss(es)."
+    )
+    _render_score_helper(state)
 
 st.markdown("---")
 st.subheader("Leaderboard")
@@ -516,9 +467,9 @@ with st.expander("📚 Recent Match History"):
         st.write("No matches played yet.")
     else:
         for row in reversed(state["history"][-20:]):
-            if "round" in row:
-                st.write(f"Round {row['round']}: **{row['winner']}** beat {row['loser']}")
-            else:
-                st.write(f"**{row['winner']}** beat {row['loser']}")
+            st.write(
+                f"**{row['winner']}** ({row['winner_score']:.1f}) beat "
+                f"{row['loser']} ({row['loser_score']:.1f})"
+            )
 
 render_app_disclaimer()
