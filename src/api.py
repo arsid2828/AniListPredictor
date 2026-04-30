@@ -3,6 +3,7 @@ import json
 import os
 import time
 import threading
+import math
 from pathlib import Path
 import logging
 
@@ -669,16 +670,35 @@ def _merge_activities_preserving_latest(cached_activities, new_activities):
     return merged
 
 
-def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_refresh: bool = False):
+def _report_activity_progress(progress_callback, media_type: str, value: float, message: str):
+    if progress_callback is None:
+        return
+    progress_callback(
+        {
+            "media_type": str(media_type).upper(),
+            "progress": max(0.0, min(float(value), 1.0)),
+            "message": str(message),
+        }
+    )
+
+
+def fetch_user_activity_history(
+    username: str,
+    media_type: str = "ANIME",
+    force_refresh: bool = False,
+    progress_callback=None,
+):
     """Fetch user's activity history (anime or manga) from AniList."""
     cache_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
     cached_activities = _load_cached_json_list(cache_path)
     
     if not force_refresh and _is_cache_valid(cache_path):
         logger.debug("Loading cached activity history for %s (%s).", username, media_type)
+        _report_activity_progress(progress_callback, media_type, 1.0, "Loaded from cache")
         return cached_activities
             
     logger.debug("Fetching AniList user ID.")
+    _report_activity_progress(progress_callback, media_type, 0.05, "Resolving AniList user")
     try:
         data = fetch_with_retry(USER_ID_QUERY, {"name": username})
         user_id = data.get("User", {}).get("id")
@@ -697,6 +717,7 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
     reached_cached_boundary = False
     
     logger.debug("Fetching activity history for %s.", username)
+    _report_activity_progress(progress_callback, media_type, 0.1, "Fetching activity pages")
     
     while has_next and page <= 200:  # Max 10,000 activities limitation to avoid infinite loop
         variables = {"userId": user_id, "page": page, "type": f"{media_type.upper()}_LIST"}
@@ -713,6 +734,14 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
         if not acts:
             break
 
+        approx_progress = 0.1 + (0.75 * (1.0 - math.exp(-page / 8.0)))
+        _report_activity_progress(
+            progress_callback,
+            media_type,
+            approx_progress,
+            f"Fetched page {page} ({len(activities) + len(acts)} activities seen)",
+        )
+
         for act in acts:
             act_id = act.get("id")
             if act_id in cached_ids:
@@ -722,15 +751,18 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
 
         has_next = page_info.get("hasNextPage", False)
         if reached_cached_boundary:
+            _report_activity_progress(progress_callback, media_type, 0.92, "Reached cached boundary, merging")
             break
         page += 1
 
     merged_activities = _merge_activities_preserving_latest(cached_activities, activities)
+    _report_activity_progress(progress_callback, media_type, 0.97, "Saving local cache")
 
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(merged_activities, f, ensure_ascii=False, indent=2)
 
     _set_last_api_error("")
+    _report_activity_progress(progress_callback, media_type, 1.0, f"Ready ({len(merged_activities)} cached activities)")
     return merged_activities
 
 if __name__ == "__main__":

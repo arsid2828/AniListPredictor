@@ -34,11 +34,9 @@ ANIME_COLOR = "#667eea"
 MANGA_COLOR = "#f299c1"
 
 
-def _load_history_rows(username, media_type):
-    history_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
-    if not history_path.exists():
-        return None
-    with open(history_path, "r", encoding="utf-8") as f:
+@st.cache_data(show_spinner=False, ttl=600)
+def _load_history_rows_cached(history_path_str, media_type, modified_ts):
+    with open(history_path_str, "r", encoding="utf-8") as f:
         acts = json.load(f)
     stats = compute_activity_stats(
         acts,
@@ -51,6 +49,19 @@ def _load_history_rows(username, media_type):
     if rows is None or rows.empty:
         return None
     return rows.copy()
+
+
+def _load_history_rows(username, media_type):
+    history_path = CACHE_DIR / f"user_activity_{media_type.lower()}_{username.lower()}.json"
+    if not history_path.exists():
+        return None
+    return _load_history_rows_cached(str(history_path), media_type, history_path.stat().st_mtime)
+
+
+def _render_history_progress(text_slot, bar_slot, media_label, value, message):
+    clamped = max(0.0, min(float(value), 1.0))
+    bar_slot.progress(clamped)
+    text_slot.caption(f"{media_label}: {int(clamped * 100)}% - {message}")
 
 
 def _build_combined_period_stats(rows, period_col):
@@ -143,25 +154,67 @@ if load_clicked or refresh_clicked:
     pretty = "Anime and Manga" if len(selected_modes) == 2 else ("Manga" if selected_modes[0] == "MANGA" else "Anime")
     force_refresh = bool(refresh_clicked)
     action_label = "Refreshing" if force_refresh else "Loading"
-    with st.spinner(f"{action_label} {pretty} history from AniList... Please wait."):
-        got_any = False
-        failures = []
-        for media_type in selected_modes:
-            acts = fetch_user_activity_history(username, media_type=media_type, force_refresh=force_refresh)
-            got_any = got_any or bool(acts)
-            if not acts:
-                last_error = get_last_api_error()
-                if last_error:
-                    failures.append(f"{media_type.title()}: {last_error}")
-        if got_any:
-            success_label = "refreshed" if force_refresh else "loaded"
-            st.success(f"{pretty} history {success_label} successfully. Reloading...")
-            time.sleep(0.4)
-            st.rerun()
-        elif failures:
-            st.error("History download failed.\n\n" + "\n".join(failures))
-        else:
-            st.warning("No activity found or private profile.")
+    st.info(
+        "The first history download can be slow because AniList activity is paginated and this app "
+        "uses conservative rate limiting to avoid hitting API limits. Cached loads should be much faster."
+    )
+    overall_text = st.empty()
+    overall_bar = st.progress(0.0)
+    media_progress = {media_type: 0.0 for media_type in selected_modes}
+    media_text_slots = {media_type: st.empty() for media_type in selected_modes}
+    media_bar_slots = {media_type: st.progress(0.0) for media_type in selected_modes}
+
+    def update_media_progress(payload):
+        media_type = payload.get("media_type", "ANIME")
+        media_label = "Anime" if media_type == "ANIME" else "Manga"
+        progress = payload.get("progress", 0.0)
+        message = payload.get("message", "Working")
+        media_progress[media_type] = progress
+        _render_history_progress(media_text_slots[media_type], media_bar_slots[media_type], media_label, progress, message)
+        overall = sum(media_progress.values()) / max(1, len(selected_modes))
+        overall_bar.progress(overall)
+        overall_text.caption(f"{action_label} {pretty}: {int(overall * 100)}% overall")
+
+    got_any = False
+    failures = []
+    for index, media_type in enumerate(selected_modes, start=1):
+        update_media_progress(
+            {
+                "media_type": media_type,
+                "progress": 0.02,
+                "message": f"Queued ({index}/{len(selected_modes)})",
+            }
+        )
+        acts = fetch_user_activity_history(
+            username,
+            media_type=media_type,
+            force_refresh=force_refresh,
+            progress_callback=update_media_progress,
+        )
+        got_any = got_any or bool(acts)
+        if not acts:
+            last_error = get_last_api_error()
+            if last_error:
+                failures.append(f"{media_type.title()}: {last_error}")
+                update_media_progress(
+                    {
+                        "media_type": media_type,
+                        "progress": media_progress.get(media_type, 0.0),
+                        "message": f"Failed - {last_error}",
+                    }
+                )
+
+    if got_any:
+        overall_bar.progress(1.0)
+        overall_text.caption(f"{action_label} {pretty}: 100% overall")
+        success_label = "refreshed" if force_refresh else "loaded"
+        st.success(f"{pretty} history {success_label} successfully. Reloading...")
+        time.sleep(0.4)
+        st.rerun()
+    elif failures:
+        st.error("History download failed.\n\n" + "\n".join(failures))
+    else:
+        st.warning("No activity found or private profile.")
 
 try:
     frames = []
