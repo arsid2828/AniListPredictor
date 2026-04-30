@@ -2,8 +2,9 @@ import html
 import hashlib
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import joblib
 import streamlit as st
@@ -28,6 +29,7 @@ CACHE_RETENTION_HOURS = 6
 DATA_RETENTION_DAYS = 7
 MODEL_RETENTION_DAYS = 7
 DEFAULT_SESSION_MAX_MINUTES = 720
+DEFAULT_DISPLAY_TIMEZONE = "Europe/Rome"
 
 MAX_USERNAME_LEN = 50
 MAX_SEARCH_LEN = 100
@@ -258,6 +260,32 @@ def _configured_session_max_minutes():
     return max(15, min(value, 24 * 60))
 
 
+def get_display_timezone_name():
+    app_config = _secret_section("app")
+    tz_name = str(app_config.get("display_timezone", DEFAULT_DISPLAY_TIMEZONE)).strip()
+    return tz_name or DEFAULT_DISPLAY_TIMEZONE
+
+
+def _get_display_timezone():
+    try:
+        return ZoneInfo(get_display_timezone_name())
+    except Exception:
+        return timezone.utc
+
+
+def format_training_timestamp(trained_at):
+    if not trained_at:
+        return "Unknown"
+    try:
+        trained_dt = datetime.fromisoformat(str(trained_at))
+        if trained_dt.tzinfo is None:
+            trained_dt = trained_dt.replace(tzinfo=timezone.utc)
+        localized = trained_dt.astimezone(_get_display_timezone())
+        return localized.strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return str(trained_at)
+
+
 def _render_login_screen():
     st.title(APP_NAME)
     st.caption("Private deployment. Sign in with an authorized Google account.")
@@ -435,7 +463,9 @@ def check_auto_train_needed(model_artifact):
         return True
     try:
         trained_dt = datetime.fromisoformat(str(trained_at))
-        days_ago = (datetime.now() - trained_dt).days
+        if trained_dt.tzinfo is None:
+            trained_dt = trained_dt.replace(tzinfo=timezone.utc)
+        days_ago = (datetime.now(timezone.utc) - trained_dt.astimezone(timezone.utc)).days
         return days_ago >= AUTO_TRAIN_DAYS
     except:
         return True

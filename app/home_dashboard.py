@@ -31,6 +31,7 @@ from app.shared import (
     check_auto_train_needed,
     check_planning_status,
     delete_local_user_artifacts,
+    format_training_timestamp,
     get_cached_profiles,
     get_dataset_path,
     get_model_path,
@@ -119,7 +120,7 @@ if mode == "AniList Profile (Machine Learning)":
                 meta = safe_load_model_artifact(username_lower, is_manga=is_manga)
                 trained_at = meta.get('trained_at', 'Unknown')
                 if trained_at != 'Unknown':
-                    trained_at = datetime.fromisoformat(str(trained_at)).strftime("%d/%m/%Y %H:%M")
+                    trained_at = format_training_timestamp(trained_at)
                 st.info(f"💾 Model found!\nLast training: {trained_at}")
             except Exception:
                 logger.exception("Failed to read model metadata.")
@@ -142,30 +143,50 @@ if mode == "AniList Profile (Machine Learning)":
                     st.warning(f"Please wait {remaining}s before training this profile again.")
                     st.stop()
                 media_label = "manga" if is_manga else "anime"
-                with st.spinner(f"Fetching {media_label} data, training..."):
-                    st.session_state["username"] = username_lower
-                    st.session_state[last_train_key] = time.time()
-                    try:
-                        if is_manga:
-                            result = train_and_evaluate_all_manga_models(username_lower)
-                        else:
-                            result = train_and_evaluate_all_models(username_lower)
-                    except Exception:
-                        logger.exception("Training failed.")
-                        st.session_state[model_trained_key] = False
-                        st.error("Training failed. Please try again later.")
-                        st.stop()
-                    
-                    if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
-                        if result.get("status") == "fallback":
-                            st.warning(result["message"])
-                        else:
-                            st.error(result["message"])
-                        st.session_state[model_trained_key] = False
+                st.session_state["username"] = username_lower
+                st.session_state[last_train_key] = time.time()
+                progress_box = st.container()
+                progress_text = progress_box.empty()
+                progress_bar = progress_box.progress(0.0)
+
+                def update_training_progress(value, message):
+                    progress_bar.progress(max(0.0, min(float(value), 1.0)))
+                    progress_text.caption(f"Training progress: {int(max(0.0, min(float(value), 1.0)) * 100)}% - {message}")
+
+                update_training_progress(0.02, f"Starting {media_label} training")
+                try:
+                    if is_manga:
+                        result = train_and_evaluate_all_manga_models(
+                            username_lower,
+                            progress_callback=update_training_progress,
+                        )
                     else:
-                        st.success("✅ Completed!")
-                        st.session_state[model_trained_key] = True
-                        st.rerun()
+                        result = train_and_evaluate_all_models(
+                            username_lower,
+                            progress_callback=update_training_progress,
+                        )
+                except Exception:
+                    logger.exception("Training failed.")
+                    st.session_state[model_trained_key] = False
+                    progress_bar.empty()
+                    progress_text.empty()
+                    st.error("Training failed. Please try again later.")
+                    st.stop()
+                
+                if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
+                    progress_bar.empty()
+                    progress_text.empty()
+                    if result.get("status") == "fallback":
+                        st.warning(result["message"])
+                    else:
+                        st.error(result["message"])
+                    st.session_state[model_trained_key] = False
+                else:
+                    update_training_progress(1.0, "Training completed")
+                    st.success("✅ Completed!")
+                    st.session_state[model_trained_key] = True
+                    time.sleep(0.5)
+                    st.rerun()
 
         if username_lower:
             st.markdown("---")

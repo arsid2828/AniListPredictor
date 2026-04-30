@@ -3,8 +3,9 @@ import numpy as np
 import logging
 import joblib
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Callable, Optional
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.neighbors import KNeighborsRegressor
@@ -36,6 +37,11 @@ MODELS_DIR = ROOT_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 MIN_DATASET_SIZE = 30
+
+
+def _report_progress(progress_callback: Optional[Callable[[float, str], None]], value: float, message: str):
+    if progress_callback is not None:
+        progress_callback(float(value), str(message))
 
 class BaselineModel:
     """Predicts using the user's historical mean up to that point."""
@@ -307,10 +313,11 @@ def _evaluate_candidates(models, X, y, n_splits=3):
         
     return pd.DataFrame(results).sort_values('MAE')
 
-def _core_train_pipeline(X, y, use_optuna=True):
+def _core_train_pipeline(X, y, use_optuna=True, progress_callback=None):
     """Core training logic (Model Selection rigorosamente su Train/Val, Valutazione onesta su Test finale)."""
     X = X.fillna(0)
     n_samples = len(X)
+    _report_progress(progress_callback, 0.35, "Preparing train/validation/test splits")
     
     # 1. SPLIT TEMPORALE CRONOLOGICO (Isolamento del Test Set)
     test_end = int(n_samples * 0.85)
@@ -334,6 +341,7 @@ def _core_train_pipeline(X, y, use_optuna=True):
     models = _get_candidate_models(len(X_train_val), X_train_inner, y_train_inner, X_val_inner, y_val_inner)
     
     # 3. VALUTAZIONE CANDIDATI (Rigida Validation per il Model Selection)
+    _report_progress(progress_callback, 0.5, "Evaluating candidate models")
     n_splits_cv = 3 if len(X_train_val) > 75 else 2
     eval_df = _evaluate_candidates(models, X_train_val, y_train_val, n_splits=n_splits_cv)
     
@@ -344,6 +352,7 @@ def _core_train_pipeline(X, y, use_optuna=True):
     # 4. TUNING OPTUNA (Solo sul miglior modello emerso, ottimizzato su Train_Val inner)
     optuna_result = None
     if use_optuna and len(X_train_val) > 40:
+        _report_progress(progress_callback, 0.65, "Running Optuna tuning on the best candidate")
         optuna_model, optuna_val_mae, optuna_params = _optuna_tune(
             best_model_name, X_train_inner, y_train_inner, X_val_inner, y_val_inner, n_trials=30
         )
@@ -357,9 +366,11 @@ def _core_train_pipeline(X, y, use_optuna=True):
             
     # 5. RETRAIN FINALE PER DEPLOYMENT
     if best_model_name != 'Baseline (Hist Mean)' and "Pruned" not in best_model_name:
+        _report_progress(progress_callback, 0.8, "Refitting the final model")
         best_model.fit(X_train_val, y_train_val) # Usa TUTTO il sapere tranne l'Holdout finale
         
     # 6. VALUTAZIONE FINALE ONESTA SUL TEST SET INCONTAMINATO
+    _report_progress(progress_callback, 0.9, "Computing final evaluation and explanations")
     final_preds = best_model.predict(X_test)
     final_test_metrics = evaluate_model(y_test, final_preds, best_model_name)
     
@@ -387,17 +398,20 @@ def _core_train_pipeline(X, y, use_optuna=True):
         'fallback_recommended': fallback_recommended,
     }
 
-def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dict[str, Any]:
+def train_and_evaluate_all_models(username: str, use_optuna: bool = True, progress_callback=None) -> Dict[str, Any]:
     """Runs the entire ANIME pipeline for a username."""
+    _report_progress(progress_callback, 0.05, "Fetching anime list and building the dataset")
     df_raw = build_user_dataframe(username, force_refresh=True, save_csv=True)
     if df_raw.empty:
         return {"status": "error", "message": f"No data found for {username}."}
     if len(df_raw) < MIN_DATASET_SIZE:
         return {"status": "fallback", "message": f"Only {len(df_raw)} rated anime found. Too few for ML - use Cold Start."}
     
+    _report_progress(progress_callback, 0.2, "Engineering anime features")
     X, y = engineer_features(df_raw)
-    result = _core_train_pipeline(X, y, use_optuna=use_optuna)
+    result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
     
+    _report_progress(progress_callback, 0.97, "Saving the trained anime model")
     model_artifact = {
         'model_name': result['model_name'],
         'model': result['model'],
@@ -408,27 +422,31 @@ def train_and_evaluate_all_models(username: str, use_optuna: bool = True) -> Dic
         'optuna_result': result['optuna_result'],
         'tscv_scores': result['tscv_scores'],
         'fallback_recommended': result['fallback_recommended'],
-        'trained_at': pd.Timestamp.now().isoformat(),
+        'trained_at': datetime.now(timezone.utc).isoformat(),
         'dataset_size': len(df_raw),
     }
     
     artifact_path = MODELS_DIR / f"{username.lower()}_best_model.pkl"
     joblib.dump(model_artifact, artifact_path)
     logger.info(f"Saved best anime model ({result['model_name']}) to {artifact_path}")
+    _report_progress(progress_callback, 1.0, "Anime training completed")
     
     return model_artifact
 
-def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) -> Dict[str, Any]:
+def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True, progress_callback=None) -> Dict[str, Any]:
     """Runs the entire MANGA pipeline for a username."""
+    _report_progress(progress_callback, 0.05, "Fetching manga list and building the dataset")
     df_raw = build_user_manga_dataframe(username, force_refresh=True, save_csv=True)
     if df_raw.empty:
         return {"status": "error", "message": f"No manga data found for {username}."}
     if len(df_raw) < MIN_DATASET_SIZE:
         return {"status": "fallback", "message": f"Only {len(df_raw)} rated manga found. Too few for ML - use Cold Start."}
     
+    _report_progress(progress_callback, 0.2, "Engineering manga features")
     X, y = engineer_manga_features(df_raw)
-    result = _core_train_pipeline(X, y, use_optuna=use_optuna)
+    result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
     
+    _report_progress(progress_callback, 0.97, "Saving the trained manga model")
     model_artifact = {
         'model_name': result['model_name'],
         'model': result['model'],
@@ -439,13 +457,14 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True) 
         'optuna_result': result['optuna_result'],
         'tscv_scores': result['tscv_scores'],
         'fallback_recommended': result['fallback_recommended'],
-        'trained_at': pd.Timestamp.now().isoformat(),
+        'trained_at': datetime.now(timezone.utc).isoformat(),
         'dataset_size': len(df_raw),
     }
     
     artifact_path = MODELS_DIR / f"{username.lower()}_manga_best_model.pkl"
     joblib.dump(model_artifact, artifact_path)
     logger.info(f"Saved best manga model ({result['model_name']}) to {artifact_path}")
+    _report_progress(progress_callback, 1.0, "Manga training completed")
     
     return model_artifact
 
