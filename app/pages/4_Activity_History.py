@@ -123,26 +123,35 @@ display_mode = st.radio("Show Activity:", ["🎬 Anime", "📖 Manga", "🔀 Bot
 selected_modes = ["ANIME", "MANGA"] if "Both" in display_mode else (["MANGA"] if "Manga" in display_mode else ["ANIME"])
 
 button_label = (
-    "⬇️ Download / Refresh Anime and Manga History"
+    "Load Anime and Manga History"
     if len(selected_modes) == 2
-    else f"⬇️ Download / Refresh {'Manga' if selected_modes[0] == 'MANGA' else 'Anime'} History"
+    else f"Load {'Manga' if selected_modes[0] == 'MANGA' else 'Anime'} History"
 )
 
-if st.button(button_label):
+col_load, col_refresh = st.columns([3, 1])
+with col_load:
+    load_clicked = st.button(button_label, width="stretch")
+with col_refresh:
+    refresh_clicked = st.button("Force Refresh", width="stretch")
+
+if load_clicked or refresh_clicked:
     pretty = "Anime and Manga" if len(selected_modes) == 2 else ("Manga" if selected_modes[0] == "MANGA" else "Anime")
-    with st.spinner(f"Downloading {pretty} history from AniList... Please wait."):
+    force_refresh = bool(refresh_clicked)
+    action_label = "Refreshing" if force_refresh else "Loading"
+    with st.spinner(f"{action_label} {pretty} history from AniList... Please wait."):
         got_any = False
         failures = []
         for media_type in selected_modes:
-            acts = fetch_user_activity_history(username, media_type=media_type, force_refresh=True)
+            acts = fetch_user_activity_history(username, media_type=media_type, force_refresh=force_refresh)
             got_any = got_any or bool(acts)
             if not acts:
                 last_error = get_last_api_error()
                 if last_error:
                     failures.append(f"{media_type.title()}: {last_error}")
         if got_any:
-            st.success(f"{pretty} history downloaded successfully. Reloading...")
-            time.sleep(1)
+            success_label = "refreshed" if force_refresh else "loaded"
+            st.success(f"{pretty} history {success_label} successfully. Reloading...")
+            time.sleep(0.4)
             st.rerun()
         elif failures:
             st.error("History download failed.\n\n" + "\n".join(failures))
@@ -158,7 +167,7 @@ try:
 
     if not frames:
         requested = "anime and manga" if len(selected_modes) == 2 else ("manga" if selected_modes[0] == "MANGA" else "anime")
-        st.info(f"Click the button to download the {requested} history.")
+        st.info(f"Click load to fetch the {requested} history. Use force refresh only when you want to bypass cache.")
         render_app_disclaimer()
         st.stop()
 

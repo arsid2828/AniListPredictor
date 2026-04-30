@@ -715,7 +715,6 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
         if reached_cached_boundary:
             break
         page += 1
-        time.sleep(0.5)
 
     merged_activities = _merge_activities_preserving_latest(cached_activities, activities)
 
