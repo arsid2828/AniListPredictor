@@ -21,22 +21,42 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, V
 from sklearn.naive_bayes import GaussianNB
 from sklearn.feature_selection import SelectFromModel
 
-from xgboost import XGBRegressor
-from lightgbm import LGBMRegressor
-import optuna
-import shap
-
 from .dataset import build_user_dataframe, build_user_manga_dataframe
 from .features import engineer_features, engineer_manga_features
 
 logger = logging.getLogger(__name__)
-optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+try:
+    from xgboost import XGBRegressor
+except Exception as exc:
+    XGBRegressor = None
+    logger.warning("XGBoost unavailable: %s", exc)
+
+try:
+    from lightgbm import LGBMRegressor
+except Exception as exc:
+    LGBMRegressor = None
+    logger.warning("LightGBM unavailable: %s", exc)
+
+try:
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+except Exception as exc:
+    optuna = None
+    logger.warning("Optuna unavailable: %s", exc)
+
+try:
+    import shap
+except Exception as exc:
+    shap = None
+    logger.warning("SHAP unavailable: %s", exc)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = ROOT_DIR / "models"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 MIN_DATASET_SIZE = 30
+DEFAULT_OPTUNA_TRIALS = int(os.environ.get("ANILIST_OPTUNA_TRIALS", "8"))
 
 
 def _report_progress(progress_callback: Optional[Callable[[float, str], None]], value: float, message: str):
@@ -135,18 +155,35 @@ def _get_candidate_models(dataset_size, X_train_inner=None, y_train_inner=None, 
         models['Random Forest'] = RandomForestRegressor(n_estimators=100, min_samples_leaf=2, random_state=42)
         models['Gradient Boosting'] = GradientBoostingRegressor(n_estimators=100, learning_rate=0.05, max_depth=4, random_state=42)
         
-    if dataset_size > 150:
-        models['XGBoost'] = XGBRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, verbosity=0)
-        models['LightGBM'] = LGBMRegressor(n_estimators=150, learning_rate=0.05, max_depth=4, random_state=42, verbose=-1)
+    if dataset_size > 200 and XGBRegressor is not None:
+        models['XGBoost'] = XGBRegressor(
+            n_estimators=80,
+            learning_rate=0.05,
+            max_depth=4,
+            random_state=42,
+            verbosity=0,
+        )
+    if dataset_size > 200 and LGBMRegressor is not None:
+        models['LightGBM'] = LGBMRegressor(
+            n_estimators=80,
+            learning_rate=0.05,
+            max_depth=4,
+            random_state=42,
+            verbose=-1,
+        )
+    if dataset_size > 220:
         models['Neural Network (MLP)'] = Pipeline([
             ('scaler', StandardScaler()), 
-            ('mlp', MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=42))
+            ('mlp', MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=250, random_state=42))
         ])
         
     return models
 
-def _optuna_tune(model_name, X_train, y_train, X_val, y_val, n_trials=30):
+def _optuna_tune(model_name, X_train, y_train, X_val, y_val, n_trials=DEFAULT_OPTUNA_TRIALS):
     """Ottimizza esclusivamente il modello selezionato sulla fold cronologica di Validation."""
+    if optuna is None:
+        return None, None, None
+
     best_model_obj = [None]
     best_mae_val = [float('inf')]
     
@@ -224,9 +261,15 @@ def _extract_feature_importance(model, columns):
 
 def _get_shap_explanations(model, X_sample, feature_names):
     """Calculate SHAP values for the best model using a small sample."""
+    if shap is None:
+        return None
+
     try:
         bg_sample = X_sample.sample(min(20, len(X_sample)), random_state=42)
-        if hasattr(model, 'feature_importances_') or isinstance(model, (XGBRegressor, LGBMRegressor, RandomForestRegressor)):
+        tree_types = tuple(
+            cls for cls in (XGBRegressor, LGBMRegressor, RandomForestRegressor) if cls is not None
+        )
+        if hasattr(model, 'feature_importances_') or isinstance(model, tree_types):
             explainer = shap.TreeExplainer(model)
         else:
             explainer = shap.Explainer(model.predict, bg_sample)
@@ -351,10 +394,10 @@ def _core_train_pipeline(X, y, use_optuna=True, progress_callback=None):
     
     # 4. TUNING OPTUNA (Solo sul miglior modello emerso, ottimizzato su Train_Val inner)
     optuna_result = None
-    if use_optuna and len(X_train_val) > 40:
+    if use_optuna and optuna is not None and len(X_train_val) > 80:
         _report_progress(progress_callback, 0.65, "Running Optuna tuning on the best candidate")
         optuna_model, optuna_val_mae, optuna_params = _optuna_tune(
-            best_model_name, X_train_inner, y_train_inner, X_val_inner, y_val_inner, n_trials=30
+            best_model_name, X_train_inner, y_train_inner, X_val_inner, y_val_inner
         )
         
         if optuna_model is not None and optuna_val_mae < eval_df.iloc[0]['MAE']:
@@ -400,73 +443,81 @@ def _core_train_pipeline(X, y, use_optuna=True, progress_callback=None):
 
 def train_and_evaluate_all_models(username: str, use_optuna: bool = True, progress_callback=None) -> Dict[str, Any]:
     """Runs the entire ANIME pipeline for a username."""
-    _report_progress(progress_callback, 0.05, "Fetching anime list and building the dataset")
-    df_raw = build_user_dataframe(username, force_refresh=True, save_csv=True)
-    if df_raw.empty:
-        return {"status": "error", "message": f"No data found for {username}."}
-    if len(df_raw) < MIN_DATASET_SIZE:
-        return {"status": "fallback", "message": f"Only {len(df_raw)} rated anime found. Too few for ML - use Cold Start."}
-    
-    _report_progress(progress_callback, 0.2, "Engineering anime features")
-    X, y = engineer_features(df_raw)
-    result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
-    
-    _report_progress(progress_callback, 0.97, "Saving the trained anime model")
-    model_artifact = {
-        'model_name': result['model_name'],
-        'model': result['model'],
-        'train_columns': result['train_columns'],
-        'metrics': result['metrics'],
-        'feature_importance': result['feature_importance'],
-        'shap_explanations': result['shap_explanations'],
-        'optuna_result': result['optuna_result'],
-        'tscv_scores': result['tscv_scores'],
-        'fallback_recommended': result['fallback_recommended'],
-        'trained_at': datetime.now(timezone.utc).isoformat(),
-        'dataset_size': len(df_raw),
-    }
-    
-    artifact_path = MODELS_DIR / f"{username.lower()}_best_model.pkl"
-    joblib.dump(model_artifact, artifact_path)
-    logger.info(f"Saved best anime model ({result['model_name']}) to {artifact_path}")
-    _report_progress(progress_callback, 1.0, "Anime training completed")
-    
-    return model_artifact
+    try:
+        _report_progress(progress_callback, 0.05, "Fetching anime list and building the dataset")
+        df_raw = build_user_dataframe(username, force_refresh=True, save_csv=True)
+        if df_raw.empty:
+            return {"status": "error", "message": f"No data found for {username}."}
+        if len(df_raw) < MIN_DATASET_SIZE:
+            return {"status": "fallback", "message": f"Only {len(df_raw)} rated anime found. Too few for ML - use Cold Start."}
+        
+        _report_progress(progress_callback, 0.2, "Engineering anime features")
+        X, y = engineer_features(df_raw)
+        result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
+        
+        _report_progress(progress_callback, 0.97, "Saving the trained anime model")
+        model_artifact = {
+            'model_name': result['model_name'],
+            'model': result['model'],
+            'train_columns': result['train_columns'],
+            'metrics': result['metrics'],
+            'feature_importance': result['feature_importance'],
+            'shap_explanations': result['shap_explanations'],
+            'optuna_result': result['optuna_result'],
+            'tscv_scores': result['tscv_scores'],
+            'fallback_recommended': result['fallback_recommended'],
+            'trained_at': datetime.now(timezone.utc).isoformat(),
+            'dataset_size': len(df_raw),
+        }
+        
+        artifact_path = MODELS_DIR / f"{username.lower()}_best_model.pkl"
+        joblib.dump(model_artifact, artifact_path)
+        logger.info(f"Saved best anime model ({result['model_name']}) to {artifact_path}")
+        _report_progress(progress_callback, 1.0, "Anime training completed")
+        
+        return model_artifact
+    except Exception as exc:
+        logger.exception("Anime training pipeline failed for %s", username)
+        return {"status": "error", "message": f"Anime training failed: {exc.__class__.__name__}: {exc}"}
 
 def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True, progress_callback=None) -> Dict[str, Any]:
     """Runs the entire MANGA pipeline for a username."""
-    _report_progress(progress_callback, 0.05, "Fetching manga list and building the dataset")
-    df_raw = build_user_manga_dataframe(username, force_refresh=True, save_csv=True)
-    if df_raw.empty:
-        return {"status": "error", "message": f"No manga data found for {username}."}
-    if len(df_raw) < MIN_DATASET_SIZE:
-        return {"status": "fallback", "message": f"Only {len(df_raw)} rated manga found. Too few for ML - use Cold Start."}
-    
-    _report_progress(progress_callback, 0.2, "Engineering manga features")
-    X, y = engineer_manga_features(df_raw)
-    result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
-    
-    _report_progress(progress_callback, 0.97, "Saving the trained manga model")
-    model_artifact = {
-        'model_name': result['model_name'],
-        'model': result['model'],
-        'train_columns': result['train_columns'],
-        'metrics': result['metrics'],
-        'feature_importance': result['feature_importance'],
-        'shap_explanations': result['shap_explanations'],
-        'optuna_result': result['optuna_result'],
-        'tscv_scores': result['tscv_scores'],
-        'fallback_recommended': result['fallback_recommended'],
-        'trained_at': datetime.now(timezone.utc).isoformat(),
-        'dataset_size': len(df_raw),
-    }
-    
-    artifact_path = MODELS_DIR / f"{username.lower()}_manga_best_model.pkl"
-    joblib.dump(model_artifact, artifact_path)
-    logger.info(f"Saved best manga model ({result['model_name']}) to {artifact_path}")
-    _report_progress(progress_callback, 1.0, "Manga training completed")
-    
-    return model_artifact
+    try:
+        _report_progress(progress_callback, 0.05, "Fetching manga list and building the dataset")
+        df_raw = build_user_manga_dataframe(username, force_refresh=True, save_csv=True)
+        if df_raw.empty:
+            return {"status": "error", "message": f"No manga data found for {username}."}
+        if len(df_raw) < MIN_DATASET_SIZE:
+            return {"status": "fallback", "message": f"Only {len(df_raw)} rated manga found. Too few for ML - use Cold Start."}
+        
+        _report_progress(progress_callback, 0.2, "Engineering manga features")
+        X, y = engineer_manga_features(df_raw)
+        result = _core_train_pipeline(X, y, use_optuna=use_optuna, progress_callback=progress_callback)
+        
+        _report_progress(progress_callback, 0.97, "Saving the trained manga model")
+        model_artifact = {
+            'model_name': result['model_name'],
+            'model': result['model'],
+            'train_columns': result['train_columns'],
+            'metrics': result['metrics'],
+            'feature_importance': result['feature_importance'],
+            'shap_explanations': result['shap_explanations'],
+            'optuna_result': result['optuna_result'],
+            'tscv_scores': result['tscv_scores'],
+            'fallback_recommended': result['fallback_recommended'],
+            'trained_at': datetime.now(timezone.utc).isoformat(),
+            'dataset_size': len(df_raw),
+        }
+        
+        artifact_path = MODELS_DIR / f"{username.lower()}_manga_best_model.pkl"
+        joblib.dump(model_artifact, artifact_path)
+        logger.info(f"Saved best manga model ({result['model_name']}) to {artifact_path}")
+        _report_progress(progress_callback, 1.0, "Manga training completed")
+        
+        return model_artifact
+    except Exception as exc:
+        logger.exception("Manga training pipeline failed for %s", username)
+        return {"status": "error", "message": f"Manga training failed: {exc.__class__.__name__}: {exc}"}
 
 if __name__ == "__main__":
     test_username = os.environ.get("TEST_USERNAME", "example_user")

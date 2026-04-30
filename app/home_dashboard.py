@@ -148,7 +148,6 @@ if mode == "AniList Profile (Machine Learning)":
                     st.stop()
                 media_label = "manga" if is_manga else "anime"
                 st.session_state["username"] = username_lower
-                st.session_state[last_train_key] = time.time()
                 progress_box = st.container()
                 progress_text = progress_box.empty()
                 progress_bar = progress_box.progress(0.0)
@@ -169,12 +168,13 @@ if mode == "AniList Profile (Machine Learning)":
                             username_lower,
                             progress_callback=update_training_progress,
                         )
-                except Exception:
+                except Exception as exc:
                     logger.exception("Training failed.")
                     st.session_state[model_trained_key] = False
+                    st.session_state.pop(last_train_key, None)
                     progress_bar.empty()
                     progress_text.empty()
-                    st.error("Training failed. Please try again later.")
+                    st.error(f"Training failed: {exc.__class__.__name__}: {exc}")
                     st.stop()
                 
                 if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
@@ -184,8 +184,10 @@ if mode == "AniList Profile (Machine Learning)":
                         st.warning(result["message"])
                     else:
                         st.error(result["message"])
+                    st.session_state.pop(last_train_key, None)
                     st.session_state[model_trained_key] = False
                 else:
+                    st.session_state[last_train_key] = time.time()
                     update_training_progress(1.0, "Training completed")
                     st.success("✅ Completed!")
                     st.session_state[model_trained_key] = True
