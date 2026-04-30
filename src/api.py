@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import time
+import threading
 from pathlib import Path
 import logging
 
@@ -15,6 +16,31 @@ from app.shared import CACHE_RETENTION_HOURS
 
 CACHE_TTL_HOURS = CACHE_RETENTION_HOURS
 REQUEST_TIMEOUT_SECONDS = 30
+MIN_SECONDS_BETWEEN_REQUESTS = 2.1
+_RATE_LIMIT_LOCK = threading.Lock()
+_LAST_REQUEST_TS = 0.0
+_LAST_API_ERROR = ""
+_HTTP = requests.Session()
+_HTTP.trust_env = False
+
+
+def _set_last_api_error(message: str = ""):
+    global _LAST_API_ERROR
+    _LAST_API_ERROR = str(message or "").strip()
+
+
+def get_last_api_error() -> str:
+    return _LAST_API_ERROR
+
+
+def _respect_anilist_rate_limit():
+    """Keep requests under AniList's degraded 30 rpm public API limit."""
+    global _LAST_REQUEST_TS
+    with _RATE_LIMIT_LOCK:
+        elapsed = time.monotonic() - _LAST_REQUEST_TS
+        if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
+            time.sleep(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
+        _LAST_REQUEST_TS = time.monotonic()
 
 def _is_cache_valid(cache_path, ttl_hours=CACHE_TTL_HOURS):
     """Check if a cache file exists and is younger than ttl_hours."""
@@ -358,7 +384,8 @@ def fetch_with_retry(query, variables, retries=3):
     """Fetch from AniList GraphQL with basic exponential backoff retry logic."""
     for attempt in range(retries):
         try:
-            response = requests.post(
+            _respect_anilist_rate_limit()
+            response = _HTTP.post(
                 API_URL, 
                 json={"query": query, "variables": variables},
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
@@ -368,6 +395,7 @@ def fetch_with_retry(query, variables, retries=3):
             # Rate limiting
             if response.status_code == 429:
                 retry_after = int(response.headers.get("Retry-After", 10))
+                _set_last_api_error(f"AniList rate limit reached. Retry after {retry_after} seconds.")
                 logger.warning("AniList rate limit hit on attempt %s/%s. Sleeping for %s seconds.", attempt + 1, retries, retry_after)
                 time.sleep(retry_after)
                 continue
@@ -377,12 +405,15 @@ def fetch_with_retry(query, variables, retries=3):
             
             if "errors" in data:
                 error_message = data["errors"][0].get("message", "Unknown")
+                _set_last_api_error(error_message)
                 logger.warning("AniList GraphQL returned an error: %s", error_message)
                 raise ValueError(f"GraphQL Error: {error_message}")
-                
+
+            _set_last_api_error("")
             return data["data"]
             
         except requests.exceptions.RequestException as e:
+            _set_last_api_error(str(e))
             logger.warning("AniList request failed on attempt %s/%s: %s", attempt + 1, retries, e)
             if attempt < retries - 1:
                 sleep_time = 2 ** attempt
@@ -643,8 +674,10 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
         data = fetch_with_retry(USER_ID_QUERY, {"name": username})
         user_id = data.get("User", {}).get("id")
         if not user_id:
+            _set_last_api_error(f"No AniList user ID found for username '{username}'.")
             return None
     except Exception as e:
+        _set_last_api_error(str(e))
         logger.error(f"Failed to fetch user ID: {e}")
         return None
         
@@ -661,6 +694,7 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
         try:
             data = fetch_with_retry(USER_ACTIVITY_QUERY, variables)
         except Exception as e:
+            _set_last_api_error(str(e))
             logger.error(f"Failed to fetch activity page {page}: {e}")
             break
             
@@ -687,7 +721,8 @@ def fetch_user_activity_history(username: str, media_type: str = "ANIME", force_
 
     with open(cache_path, 'w', encoding='utf-8') as f:
         json.dump(merged_activities, f, ensure_ascii=False, indent=2)
-        
+
+    _set_last_api_error("")
     return merged_activities
 
 if __name__ == "__main__":

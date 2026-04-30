@@ -50,8 +50,14 @@ st.markdown(
 
 ### API usage notice
 - The app is designed to use AniList data sparingly and with local short-term caching
-- Public deployment should continue respecting AniList rate limits and terms of use
+- Deployment should continue respecting AniList rate limits and terms of use
+- If AniList returns `429 Too Many Requests`, the app waits before retrying instead of continuing immediately
+- Candidate downloads should be kept moderate, especially while AniList publishes reduced temporary limits
 - If the project becomes commercial beyond AniList's stated threshold or needs special approval, contact AniList directly at `contact@anilist.co`
+
+### Private access notice
+- App access is restricted through Google OpenID Connect and a server-side allowlist configured in Streamlit secrets
+- Google login limits authorized accounts, not physical devices; protect allowed Google accounts with strong device and account security
 
 ### Project scope statement
 {APP_SCOPE_NOTE}

@@ -1,4 +1,5 @@
 import html
+import hashlib
 import json
 import re
 from datetime import datetime
@@ -26,6 +27,7 @@ API_DOCS_URL = "https://anilist.gitbook.io/anilist-apiv2-docs"
 CACHE_RETENTION_HOURS = 6
 DATA_RETENTION_DAYS = 7
 MODEL_RETENTION_DAYS = 7
+DEFAULT_SESSION_MAX_MINUTES = 720
 
 MAX_USERNAME_LEN = 50
 MAX_SEARCH_LEN = 100
@@ -48,6 +50,10 @@ CUSTOM_CSS = """
         border: 1px solid rgba(255,255,255,0.08);
         margin-bottom: 1rem;
         box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        min-height: 112px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     
     .metric-value {
@@ -106,6 +112,33 @@ CUSTOM_CSS = """
         border-radius: 12px;
         padding: 1rem;
         border: 1px solid rgba(255,255,255,0.08);
+        min-height: 112px;
+    }
+
+    .profile-metric-card {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-radius: 12px;
+        padding: 1rem;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-left-width: 5px;
+        min-height: 112px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        box-sizing: border-box;
+    }
+
+    .profile-metric-label {
+        font-size: 0.8rem;
+        color: #a0a0b0;
+        text-transform: uppercase;
+        margin-bottom: 0.35rem;
+    }
+
+    .profile-metric-value {
+        font-size: 1.2rem;
+        font-weight: 700;
+        line-height: 1.25;
     }
     
     .recommendation-card {
@@ -164,6 +197,122 @@ AUTO_TRAIN_DAYS = 7
 
 def inject_css():
     st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+def _secret_section(name):
+    try:
+        section = st.secrets.get(name, {})
+    except Exception:
+        return {}
+    return dict(section) if hasattr(section, "items") else {}
+
+
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _normalize_email(email):
+    return str(email or "").strip().lower()
+
+
+def _sha256_text(value):
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _get_current_user_email():
+    try:
+        return _normalize_email(st.user.get("email") or st.user.email)
+    except Exception:
+        return ""
+
+
+def _get_allowed_emails():
+    access = _secret_section("access")
+    emails = {_normalize_email(email) for email in _as_list(access.get("allowed_emails"))}
+    hashes = {str(item).strip().lower() for item in _as_list(access.get("allowed_email_hashes"))}
+    return {email for email in emails if email}, {item for item in hashes if item}
+
+
+def _is_email_authorized(email):
+    allowed_emails, allowed_hashes = _get_allowed_emails()
+    normalized = _normalize_email(email)
+    if not normalized:
+        return False
+    if normalized in allowed_emails:
+        return True
+    return _sha256_text(normalized) in allowed_hashes
+
+
+def _configured_session_max_minutes():
+    access = _secret_section("access")
+    try:
+        value = int(access.get("session_max_minutes", DEFAULT_SESSION_MAX_MINUTES))
+    except (TypeError, ValueError):
+        value = DEFAULT_SESSION_MAX_MINUTES
+    return max(15, min(value, 24 * 60))
+
+
+def _render_login_screen():
+    st.title(APP_NAME)
+    st.caption("Private deployment. Sign in with an authorized Google account.")
+    st.button("Sign in with Google", on_click=st.login)
+
+
+def require_authorized_google_user():
+    """
+    Stop unauthenticated or unauthorized visitors before any app page can run.
+
+    Configure Streamlit OIDC under [auth] and the app allowlist under [access]
+    in .streamlit/secrets.toml or Streamlit Community Cloud secrets.
+    """
+    auth_config = _secret_section("auth")
+    access_config = _secret_section("access")
+
+    if access_config.get("disable_auth_for_local_dev") and not auth_config:
+        st.warning("Authentication is disabled for local development. Do not enable this in production.")
+        return
+
+    if not auth_config:
+        st.error("Authentication is not configured. Add [auth] and [access] to Streamlit secrets before deployment.")
+        st.stop()
+
+    if not getattr(st.user, "is_logged_in", False):
+        _render_login_screen()
+        st.stop()
+
+    email = _get_current_user_email()
+    allowed_emails, allowed_hashes = _get_allowed_emails()
+    if not allowed_emails and not allowed_hashes:
+        st.error("No authorized Google accounts are configured in [access].")
+        st.button("Log out", on_click=st.logout)
+        st.stop()
+
+    if not _is_email_authorized(email):
+        safe_email = html.escape(email or "unknown account")
+        st.error(f"{safe_email} is signed in, but is not authorized for this private app.")
+        st.button("Log out", on_click=st.logout)
+        st.stop()
+
+    max_minutes = _configured_session_max_minutes()
+    now_ts = datetime.now().timestamp()
+    login_seen_at = st.session_state.setdefault("_login_seen_at", now_ts)
+    if now_ts - float(login_seen_at) > max_minutes * 60:
+        st.warning("Session expired. Please sign in again.")
+        st.logout()
+        st.stop()
+
+
+def render_auth_sidebar():
+    email = html.escape(_get_current_user_email())
+    if email:
+        st.sidebar.caption(f"Signed in as {email}")
+    st.sidebar.button("Log out", on_click=st.logout, width="stretch", key="auth_logout")
 
 
 def purge_expired_runtime_artifacts():
@@ -309,6 +458,7 @@ def render_metric_card(label, value, delta=None):
 
 def render_user_badge():
     """Show the currently logged-in username as a badge on any page."""
+    render_auth_sidebar()
     username = st.session_state.get("username", "")
     if username:
         safe_username = html.escape(str(username))

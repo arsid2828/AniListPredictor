@@ -75,9 +75,9 @@ with col4:
 
     st.markdown(
         f"""
-    <div style="background: rgba(255,255,255,0.05); padding: 10px; border-radius: 10px; border-left: 5px solid {color};">
-        <div style="font-size: 0.8rem; color: #a0a0b0; text-transform: uppercase;">Tendency</div>
-        <div style="font-size: 1.2rem; font-weight: 700; color: {color};">
+    <div class="profile-metric-card" style="border-left-color: {color};">
+        <div class="profile-metric-label">Tendency</div>
+        <div class="profile-metric-value" style="color: {color};">
             {direction_emoji.get(bias['direction'], '')} {label}
         </div>
     </div>

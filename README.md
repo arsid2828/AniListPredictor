@@ -91,3 +91,17 @@ I dati vengono salvati localmente nelle cartelle `cache/` (in formato leggero JS
 
 ---
 This project is unofficial and is not affiliated with or endorsed by AniList. Data is sourced from the AniList GraphQL API. Anime and manga titles, descriptions, cover images, and related metadata remain the property of their respective owners.
+
+---
+
+## Private Streamlit Deploy
+
+Production entry point:
+
+```bash
+python -m streamlit run app/main.py
+```
+
+The app is protected by Streamlit's Google OIDC login plus a server-side allowlist in Streamlit secrets. Copy `.streamlit/secrets.example.toml` into Streamlit Community Cloud secrets, set the deployed `redirect_uri`, and add only trusted Google accounts under `[access]`.
+
+See `DEPLOYMENT_SECURITY.md` for the complete deployment, privacy, and AniList API checklist.

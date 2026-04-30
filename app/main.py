@@ -2,9 +2,12 @@ from pathlib import Path
 
 import streamlit as st
 
+from app.shared import require_authorized_google_user
+
 
 APP_DIR = Path(__file__).resolve().parent
 
+require_authorized_google_user()
 
 pages = {
     "Main": [

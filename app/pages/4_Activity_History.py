@@ -20,7 +20,7 @@ from app.shared import (
     render_user_badge,
 )
 from src.analytics import compute_activity_stats
-from src.api import CACHE_DIR, fetch_user_activity_history
+from src.api import CACHE_DIR, fetch_user_activity_history, get_last_api_error
 
 logger = logging.getLogger(__name__)
 
@@ -132,13 +132,20 @@ if st.button(button_label):
     pretty = "Anime and Manga" if len(selected_modes) == 2 else ("Manga" if selected_modes[0] == "MANGA" else "Anime")
     with st.spinner(f"Downloading {pretty} history from AniList... Please wait."):
         got_any = False
+        failures = []
         for media_type in selected_modes:
             acts = fetch_user_activity_history(username, media_type=media_type, force_refresh=True)
             got_any = got_any or bool(acts)
+            if not acts:
+                last_error = get_last_api_error()
+                if last_error:
+                    failures.append(f"{media_type.title()}: {last_error}")
         if got_any:
             st.success(f"{pretty} history downloaded successfully. Reloading...")
             time.sleep(1)
             st.rerun()
+        elif failures:
+            st.error("History download failed.\n\n" + "\n".join(failures))
         else:
             st.warning("No activity found or private profile.")
 

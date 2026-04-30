@@ -298,9 +298,7 @@ if mode == "AniList Profile (Machine Learning)":
             if sel_studio:
                 st.caption("Filtered locally.")
         
-        rec_col1, rec_col2 = st.columns([3, 1])
-        with rec_col1:
-            rec_btn = st.button(f"✨ Generate {media_label} Recommendations", width="stretch")
+        rec_btn = st.button(f"✨ Generate {media_label} Recommendations", width="stretch")
         
         candidate_limit = max(10, min(int(candidate_limit), 1000))
         if rec_btn:

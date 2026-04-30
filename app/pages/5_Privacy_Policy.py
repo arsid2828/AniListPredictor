@@ -35,6 +35,7 @@ st.markdown(
 This application is operated by the project owner deploying this site. For privacy requests, contact: `{CONTACT_EMAIL}`.
 
 ### 2. What data is processed
+- Google account identity claims needed for login, especially email address
 - AniList usernames entered by visitors
 - Public AniList profile, list, title, and activity data requested from the AniList GraphQL API
 - Derived analytics needed to generate charts, compatibility views, and score predictions
@@ -42,6 +43,7 @@ This application is operated by the project owner deploying this site. For priva
 
 ### 3. Why the data is processed
 - To fetch public AniList data requested by the visitor
+- To restrict access to explicitly authorized Google accounts
 - To calculate recommendations, compatibility, analytics, and score predictions
 - To reduce repeated API calls and respect AniList rate limits through short-lived caching
 - To support debugging, reliability, and secure operation of the site
@@ -53,9 +55,10 @@ This app is designed as an unofficial analytics and prediction companion for Ani
 - API cache files are automatically removed after about {CACHE_RETENTION_HOURS} hours
 - Derived datasets and local trained models are automatically removed after about {DATA_RETENTION_DAYS} days
 - Runtime retention may be shortened further by manual deletion
+- Streamlit authentication cookies may persist in the browser after login; use the logout button on shared devices
 
 ### 6. Sharing
-This app is not designed to sell personal data. Data may be processed by the hosting provider that runs the deployed site, and requests are sent to AniList when a user asks the app to fetch AniList data.
+This app is not designed to sell personal data. Data may be processed by the hosting provider that runs the deployed site, by Google for authentication, and by AniList when a user asks the app to fetch AniList data.
 
 ### 7. User rights
 If applicable under your jurisdiction, you may request access, correction, or deletion of locally retained data related to your use of this app by contacting `{CONTACT_EMAIL}`.
