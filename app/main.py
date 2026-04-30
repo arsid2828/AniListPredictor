@@ -3,12 +3,13 @@ import sys
 
 import streamlit as st
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
-
-from app.shared import require_authorized_google_user
-
-
 APP_DIR = Path(__file__).resolve().parent
+ROOT_DIR = APP_DIR.parent
+for path in (str(ROOT_DIR), str(APP_DIR)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
+from shared import require_authorized_google_user
 
 require_authorized_google_user()
 

@@ -12,7 +12,16 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 CACHE_DIR = ROOT_DIR / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-from app.shared import CACHE_RETENTION_HOURS
+try:
+    from app.shared import CACHE_RETENTION_HOURS
+except ModuleNotFoundError:
+    import sys
+    from pathlib import Path
+
+    APP_DIR = Path(__file__).resolve().parent.parent / "app"
+    if str(APP_DIR) not in sys.path:
+        sys.path.insert(0, str(APP_DIR))
+    from shared import CACHE_RETENTION_HOURS
 
 CACHE_TTL_HOURS = CACHE_RETENTION_HOURS
 REQUEST_TIMEOUT_SECONDS = 30

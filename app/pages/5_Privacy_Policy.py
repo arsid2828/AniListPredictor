@@ -4,9 +4,14 @@ from pathlib import Path
 
 import streamlit as st
 
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+PAGES_DIR = Path(__file__).resolve().parent
+APP_DIR = PAGES_DIR.parent
+ROOT_DIR = APP_DIR.parent
+for path in (str(ROOT_DIR), str(APP_DIR)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
-from app.shared import (
+from shared import (
     APP_NAME,
     CACHE_RETENTION_HOURS,
     DATA_RETENTION_DAYS,

@@ -7,7 +7,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+APP_DIR = Path(__file__).resolve().parent
+ROOT_DIR = APP_DIR.parent
+for path in (str(ROOT_DIR), str(APP_DIR)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 from src.api import search_anime_by_title, get_candidate_anime_for_recommendations, search_manga_by_title, get_candidate_manga_for_recommendations
 from src.dataset import build_user_dataframe, build_user_manga_dataframe
@@ -20,7 +24,7 @@ from src.cold_start import (
     build_manga_cold_start_profile, content_based_heuristic_scorer_manga,
     generate_manga_cold_start_recommendations, MANGA_FORMATS_LIST, MANGA_LENGTHS_LIST
 )
-from app.shared import (
+from shared import (
     APP_NAME,
     MAX_SEARCH_LEN,
     MAX_STUDIO_LEN,
