@@ -301,6 +301,7 @@ if mode == "AniList Profile (Machine Learning)":
             value=500, 
             step=10
         )
+        st.caption("Repeated recommendation runs with the same limit and filters now reuse a cached candidate pool when available.")
         
         st.markdown("#### 🎯 Advanced Filters (Optional)")
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)

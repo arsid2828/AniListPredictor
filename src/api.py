@@ -4,6 +4,7 @@ import os
 import time
 import threading
 import math
+import hashlib
 from pathlib import Path
 import logging
 
@@ -502,9 +503,16 @@ def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None,
     Fetch top anime by popularity and top anime by score to serve as candidates.
     Returns a unique list of media dictionaries.
     """
+    cache_path = _get_recommendation_cache_path("anime", limit, genre=genre, tag=tag, year=year)
+    if _is_cache_valid(cache_path):
+        cached_candidates = _load_cached_json_list(cache_path)
+        if cached_candidates:
+            logger.debug("Loading cached anime recommendation candidates for limit=%s.", limit)
+            return cached_candidates
+
     limit_per_category = limit // 2
     per_page = 50
-    pages_per_category = max(1, limit_per_category // per_page)
+    pages_per_category = max(1, math.ceil(limit_per_category / per_page))
     
     unique_candidates = {}
     
@@ -522,7 +530,6 @@ def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None,
         media_list = data.get("Page", {}).get("media", [])
         for m in media_list:
             if m: unique_candidates[m['id']] = m
-        time.sleep(1) # Polite delay
         
     for p in range(1, pages_per_category + 1):
         vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
@@ -531,9 +538,10 @@ def get_candidate_anime_for_recommendations(limit: int = 500, genre: str = None,
         media_list = data.get("Page", {}).get("media", [])
         for m in media_list:
             if m: unique_candidates[m['id']] = m
-        time.sleep(1) # Polite delay
-        
-    return list(unique_candidates.values())
+    candidates = list(unique_candidates.values())
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(candidates, f, ensure_ascii=False, indent=2)
+    return candidates
 
 def fetch_user_manga_list(username: str, force_refresh: bool = False):
     cache_path = CACHE_DIR / f"user_manga_list_{username.lower()}.json"
@@ -585,9 +593,16 @@ def search_manga_by_title(title: str):
     return data.get("Page", {}).get("media", [])
 
 def get_candidate_manga_for_recommendations(limit: int = 500, genre: str = None, tag: str = None):
+    cache_path = _get_recommendation_cache_path("manga", limit, genre=genre, tag=tag)
+    if _is_cache_valid(cache_path):
+        cached_candidates = _load_cached_json_list(cache_path)
+        if cached_candidates:
+            logger.debug("Loading cached manga recommendation candidates for limit=%s.", limit)
+            return cached_candidates
+
     limit_per_category = limit // 2
     per_page = 50
-    pages_per_category = max(1, limit_per_category // per_page)
+    pages_per_category = max(1, math.ceil(limit_per_category / per_page))
     
     unique_candidates = {}
     
@@ -603,7 +618,6 @@ def get_candidate_manga_for_recommendations(limit: int = 500, genre: str = None,
         data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_pop)
         for m in data.get("Page", {}).get("media", []):
             if m: unique_candidates[m['id']] = m
-        time.sleep(1)
         
     for p in range(1, pages_per_category + 1):
         vars_score = {"page": p, "perPage": per_page, "sort": ["SCORE_DESC"]}
@@ -611,9 +625,10 @@ def get_candidate_manga_for_recommendations(limit: int = 500, genre: str = None,
         data = fetch_with_retry(MANGA_CANDIDATES_QUERY, vars_score)
         for m in data.get("Page", {}).get("media", []):
             if m: unique_candidates[m['id']] = m
-        time.sleep(1)
-        
-    return list(unique_candidates.values())
+    candidates = list(unique_candidates.values())
+    with open(cache_path, 'w', encoding='utf-8') as f:
+        json.dump(candidates, f, ensure_ascii=False, indent=2)
+    return candidates
 
 USER_ACTIVITY_QUERY = """
 query ($userId: Int, $page: Int, $type: ActivityType) {
@@ -655,6 +670,23 @@ def _load_cached_json_list(cache_path: Path):
     except Exception:
         logger.warning("Failed to read cached JSON list from %s.", cache_path.name, exc_info=True)
         return []
+
+
+def _build_recommendation_cache_key(media_kind: str, limit: int, genre: str = None, tag: str = None, year: int = None):
+    payload = {
+        "media_kind": str(media_kind or "").upper(),
+        "limit": int(limit),
+        "genre": str(genre or "").strip().lower(),
+        "tag": str(tag or "").strip().lower(),
+        "year": int(year) if year else None,
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:20]
+
+
+def _get_recommendation_cache_path(media_kind: str, limit: int, genre: str = None, tag: str = None, year: int = None):
+    cache_key = _build_recommendation_cache_key(media_kind, limit, genre=genre, tag=tag, year=year)
+    return CACHE_DIR / f"recommendation_candidates_{media_kind.lower()}_{cache_key}.json"
 
 
 def _merge_activities_preserving_latest(cached_activities, new_activities):
