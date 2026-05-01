@@ -9,7 +9,7 @@ for path in (str(ROOT_DIR), str(APP_DIR)):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from shared import require_authorized_google_user
+from shared import is_admin_user, require_authorized_google_user
 
 require_authorized_google_user()
 
@@ -32,6 +32,11 @@ pages = {
         st.Page(str(APP_DIR / "pages" / "6_Data_Source_And_Legal.py"), title="Data Source & Legal", icon="📘"),
     ],
 }
+
+if is_admin_user():
+    pages["Legal"].append(
+        st.Page(str(APP_DIR / "pages" / "9_Admin.py"), title="Admin", icon="🛠️")
+    )
 
 
 navigation = st.navigation(pages, position="sidebar")

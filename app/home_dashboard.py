@@ -43,6 +43,7 @@ from shared import (
     inject_css,
     is_valid_username,
     normalize_limited_text,
+    register_profile_for_current_viewer,
     render_app_disclaimer,
     render_metric_card,
     render_user_badge,
@@ -134,6 +135,7 @@ if mode == "AniList Profile (Machine Learning)":
         
         with col_load:
             if st.button("📂 Load", width="stretch", disabled=not (model_path and model_path.exists())):
+                register_profile_for_current_viewer(username_lower)
                 st.session_state["username"] = username_lower
                 st.session_state[model_trained_key] = True
                 st.rerun()
@@ -187,6 +189,7 @@ if mode == "AniList Profile (Machine Learning)":
                     st.session_state.pop(last_train_key, None)
                     st.session_state[model_trained_key] = False
                 else:
+                    register_profile_for_current_viewer(username_lower)
                     st.session_state[last_train_key] = time.time()
                     update_training_progress(1.0, "Training completed")
                     st.success("✅ Completed!")
@@ -247,13 +250,22 @@ if mode == "AniList Profile (Machine Learning)":
             st.caption(f"📊 TimeSeriesSplit CV (5-fold): MAE = {np.mean(scores):.3f} ± {np.std(scores):.3f}")
         
         with st.expander("📋 Model Details & Comparison"):
-            metrics_df = pd.DataFrame(model_artifact['metrics'])
+            metrics_df = pd.DataFrame(model_artifact['metrics']).sort_values("MAE", ascending=True).reset_index(drop=True)
+            st.caption(
+                "Models are ordered by MAE. The selected best model is shown with its final test-set evaluation, "
+                "while the other candidates reflect selection-stage validation metrics."
+            )
             
             # Plotly bar chart for model comparison
             fig = px.bar(metrics_df, x='model', y='MAE', color='MAE',
                         color_continuous_scale='RdYlGn_r',
                         title="MAE Comparison between Models (lower = better)")
-            fig.update_layout(xaxis_tickangle=-45, height=400, template='plotly_dark')
+            fig.update_layout(
+                xaxis_tickangle=-45,
+                height=400,
+                template='plotly_dark',
+                xaxis={"categoryorder": "array", "categoryarray": metrics_df["model"].tolist()},
+            )
             st.plotly_chart(fig, width="stretch")
             
             st.dataframe(metrics_df, width="stretch")

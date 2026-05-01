@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from typing import Dict, List
 
 import joblib
 import streamlit as st
@@ -30,6 +31,8 @@ DATA_RETENTION_DAYS = 7
 MODEL_RETENTION_DAYS = 7
 DEFAULT_SESSION_MAX_MINUTES = 720
 DEFAULT_DISPLAY_TIMEZONE = "Europe/Rome"
+PROFILE_OWNER_REGISTRY_PATH = CACHE_DIR / "profile_owners.json"
+ADMIN_EMAIL = "arsidhocia@gmail.com"
 
 MAX_USERNAME_LEN = 50
 MAX_SEARCH_LEN = 100
@@ -227,11 +230,87 @@ def _sha256_text(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _viewer_keys_for_email(email: str) -> List[str]:
+    normalized = _normalize_email(email)
+    if not normalized:
+        return ["local-dev"]
+    return [normalized, _sha256_text(normalized)]
+
+
+def _current_viewer_key():
+    return _viewer_keys_for_email(_get_current_user_email())[0]
+
+
+def _load_profile_owner_registry():
+    if not PROFILE_OWNER_REGISTRY_PATH.exists():
+        return {}
+    try:
+        with open(PROFILE_OWNER_REGISTRY_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _save_profile_owner_registry(registry):
+    try:
+        with open(PROFILE_OWNER_REGISTRY_PATH, "w", encoding="utf-8") as f:
+            json.dump(registry, f, ensure_ascii=False, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
+
+def register_profile_for_current_viewer(username: str):
+    normalized = str(username or "").strip().lower()
+    if not normalized:
+        return
+    registry = _load_profile_owner_registry()
+    viewer_key = _current_viewer_key()
+    profiles = set(registry.get(viewer_key, []))
+    profiles.add(normalized)
+    registry[viewer_key] = sorted(profiles)
+    _save_profile_owner_registry(registry)
+
+
+def unregister_profile_for_current_viewer(username: str):
+    normalized = str(username or "").strip().lower()
+    if not normalized:
+        return
+    registry = _load_profile_owner_registry()
+    viewer_email = _get_current_user_email()
+    changed = False
+    for viewer_key in _viewer_keys_for_email(viewer_email):
+        profiles = set(registry.get(viewer_key, []))
+        if normalized not in profiles:
+            continue
+        profiles.remove(normalized)
+        changed = True
+        if profiles:
+            registry[viewer_key] = sorted(profiles)
+        else:
+            registry.pop(viewer_key, None)
+    if not changed:
+        return
+    _save_profile_owner_registry(registry)
+
+
 def _get_current_user_email():
     try:
         return _normalize_email(st.user.get("email") or st.user.email)
     except Exception:
         return ""
+
+
+def is_admin_user():
+    return _get_current_user_email() == ADMIN_EMAIL
+
+
+def require_admin_user():
+    if not is_admin_user():
+        st.error("This page is restricted to the site owner.")
+        st.stop()
 
 
 def _get_allowed_emails():
@@ -420,6 +499,64 @@ def delete_local_user_artifacts(username: str):
             path.unlink(missing_ok=True)
         except OSError:
             continue
+    unregister_profile_for_all_viewers(normalized)
+    unregister_profile_for_current_viewer(normalized)
+
+
+def _normalize_registry_viewer_email(viewer_email: str) -> str:
+    return _normalize_email(viewer_email)
+
+
+def register_profile_for_viewer(viewer_email: str, username: str):
+    normalized_email = _normalize_registry_viewer_email(viewer_email)
+    normalized_username = str(username or "").strip().lower()
+    if not normalized_email or not normalized_username:
+        return False
+    registry = _load_profile_owner_registry()
+    profiles = set(registry.get(normalized_email, []))
+    profiles.add(normalized_username)
+    registry[normalized_email] = sorted(profiles)
+    _save_profile_owner_registry(registry)
+    return True
+
+
+def unregister_profile_for_viewer(viewer_email: str, username: str):
+    normalized_email = _normalize_registry_viewer_email(viewer_email)
+    normalized_username = str(username or "").strip().lower()
+    if not normalized_email or not normalized_username:
+        return False
+    registry = _load_profile_owner_registry()
+    profiles = set(registry.get(normalized_email, []))
+    if normalized_username not in profiles:
+        return False
+    profiles.remove(normalized_username)
+    if profiles:
+        registry[normalized_email] = sorted(profiles)
+    else:
+        registry.pop(normalized_email, None)
+    _save_profile_owner_registry(registry)
+    return True
+
+
+def unregister_profile_for_all_viewers(username: str):
+    normalized_username = str(username or "").strip().lower()
+    if not normalized_username:
+        return False
+    registry = _load_profile_owner_registry()
+    changed = False
+    for viewer_key in list(registry.keys()):
+        profiles = set(registry.get(viewer_key, []))
+        if normalized_username not in profiles:
+            continue
+        profiles.remove(normalized_username)
+        changed = True
+        if profiles:
+            registry[viewer_key] = sorted(profiles)
+        else:
+            registry.pop(viewer_key, None)
+    if changed:
+        _save_profile_owner_registry(registry)
+    return changed
 
 def init_session_state():
     if not st.session_state.get("_runtime_cleanup_done"):
@@ -512,20 +649,86 @@ def render_app_disclaimer():
 
 
 def get_cached_profiles():
-    """Scan the models directory for previously trained profiles."""
+    """Return only profiles associated with the currently signed-in viewer."""
+    registry = _load_profile_owner_registry()
     profiles = set()
-    if MODELS_DIR.exists():
-        for f in MODELS_DIR.glob("*_best_model.pkl"):
-            name = f.stem
-            # Extract username: remove _best_model or _manga_best_model suffix
-            name = re.sub(r'_manga_best_model$', '', name)
-            name = re.sub(r'_best_model$', '', name)
+    for viewer_key in _viewer_keys_for_email(_get_current_user_email()):
+        profiles.update(registry.get(viewer_key, []))
+    current_username = normalize_limited_text(st.session_state.get("username", ""), MAX_USERNAME_LEN).lower()
+    if current_username:
+        profiles.add(current_username)
+    return sorted(profile for profile in profiles if profile)
+
+
+def get_profile_owner_registry():
+    return _load_profile_owner_registry()
+
+
+def get_all_runtime_usernames():
+    usernames = set()
+    registry = _load_profile_owner_registry()
+    for profiles in registry.values():
+        usernames.update(str(profile).strip().lower() for profile in profiles if str(profile).strip())
+
+    file_patterns = (
+        (MODELS_DIR, "*_best_model.pkl", [r"_manga_best_model$", r"_best_model$"]),
+        (DATA_DIR, "*_clean.csv", [r"_manga_clean$", r"_clean$"]),
+        (CACHE_DIR, "user_list_*.json", [r"^user_list_"]),
+        (CACHE_DIR, "user_manga_list_*.json", [r"^user_manga_list_"]),
+        (CACHE_DIR, "user_activity_anime_*.json", [r"^user_activity_anime_"]),
+        (CACHE_DIR, "user_activity_manga_*.json", [r"^user_activity_manga_"]),
+    )
+    for directory, pattern, regexes in file_patterns:
+        if not directory.exists():
+            continue
+        for path in directory.glob(pattern):
+            name = path.stem
+            for regex in regexes:
+                name = re.sub(regex, "", name)
+            name = str(name).strip().lower()
             if name:
-                profiles.add(name.lower())
-    # Also check cache for fetched-but-not-yet-trained profiles
-    if CACHE_DIR.exists():
-        for f in CACHE_DIR.glob("user_list_*.json"):
-            name = f.stem.replace('user_list_', '')
-            if name:
-                profiles.add(name.lower())
-    return sorted(list(profiles))
+                usernames.add(name)
+    return sorted(usernames)
+
+
+def get_user_artifact_paths(username: str) -> Dict[str, Path]:
+    normalized = str(username or "").strip().lower()
+    return {
+        "anime_list_cache": CACHE_DIR / f"user_list_{normalized}.json",
+        "manga_list_cache": CACHE_DIR / f"user_manga_list_{normalized}.json",
+        "anime_history_cache": CACHE_DIR / f"user_activity_anime_{normalized}.json",
+        "manga_history_cache": CACHE_DIR / f"user_activity_manga_{normalized}.json",
+        "anime_dataset": DATA_DIR / f"{normalized}_clean.csv",
+        "manga_dataset": DATA_DIR / f"{normalized}_manga_clean.csv",
+        "anime_model": MODELS_DIR / f"{normalized}_best_model.pkl",
+        "manga_model": MODELS_DIR / f"{normalized}_manga_best_model.pkl",
+    }
+
+
+def get_user_artifact_summary(username: str):
+    summaries = []
+    for artifact_type, path in get_user_artifact_paths(username).items():
+        exists = path.exists()
+        stat = path.stat() if exists else None
+        summaries.append(
+            {
+                "artifact_type": artifact_type,
+                "path": str(path),
+                "exists": exists,
+                "size_bytes": int(stat.st_size) if stat else 0,
+                "modified_at": datetime.fromtimestamp(stat.st_mtime).astimezone(_get_display_timezone()).strftime("%d/%m/%Y %H:%M:%S") if stat else "",
+            }
+        )
+    return summaries
+
+
+def delete_artifact_by_type(username: str, artifact_type: str):
+    paths = get_user_artifact_paths(username)
+    path = paths.get(str(artifact_type or "").strip())
+    if path is None:
+        return False
+    try:
+        path.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
