@@ -15,7 +15,14 @@ for path in (str(ROOT_DIR), str(APP_DIR)):
 
 from src.api import search_anime_by_title, get_candidate_anime_for_recommendations, search_manga_by_title, get_candidate_manga_for_recommendations
 from src.dataset import build_user_dataframe, build_user_manga_dataframe
-from src.features import build_inference_features, build_manga_inference_features
+from src.features import (
+    build_inference_features,
+    build_inference_feature_row,
+    build_manga_inference_feature_row,
+    build_manga_inference_features,
+    prepare_anime_inference_context,
+    prepare_manga_inference_context,
+)
 from src.models import train_and_evaluate_all_models, train_and_evaluate_all_manga_models
 from src.analytics import get_shap_explanation, shap_to_dataframe
 from src.cold_start import (
@@ -395,18 +402,33 @@ if mode == "AniList Profile (Machine Learning)":
                             user_history_df['sort_date'] = pd.to_datetime(pd.Timestamp.now())
                         
                         prog = st.progress(0)
+                        inference_context = (
+                            prepare_manga_inference_context(user_history_df, train_columns)
+                            if is_manga
+                            else prepare_anime_inference_context(user_history_df, train_columns)
+                        )
+                        feature_rows = []
+                        candidate_refs = []
                         for idx, cand in enumerate(valid_candidates):
-                            if idx % 10 == 0 and valid_candidates:
-                                prog.progress(max(0.01, min((idx + 1) / len(valid_candidates), 1.0)))
+                            if idx % 25 == 0 and valid_candidates:
+                                prog.progress(max(0.01, min((idx + 1) / len(valid_candidates), 0.65)))
                             try:
-                                if is_manga:
-                                    X_infer = build_manga_inference_features(cand, user_history_df, train_columns)
-                                else:
-                                    X_infer = build_inference_features(cand, user_history_df, train_columns)
-                                pred = float(np.clip(model.predict(X_infer)[0], 0.0, 10.0))
-                                results_list.append((pred, cand))
+                                row = (
+                                    build_manga_inference_feature_row(cand, inference_context)
+                                    if is_manga
+                                    else build_inference_feature_row(cand, inference_context)
+                                )
+                                feature_rows.append(row)
+                                candidate_refs.append(cand)
                             except Exception:
-                                logger.debug("Skipping one candidate because inference failed.", exc_info=True)
+                                logger.debug("Skipping one candidate because feature generation failed.", exc_info=True)
+
+                        if feature_rows:
+                            prog.progress(0.85)
+                            X_batch = pd.DataFrame(feature_rows, columns=train_columns).fillna(0)
+                            preds = np.clip(model.predict(X_batch), 0.0, 10.0)
+                            results_list = [(float(pred), cand) for pred, cand in zip(preds, candidate_refs)]
+                            prog.progress(1.0)
                         prog.empty()
                         
                         results_list.sort(key=lambda x: x[0], reverse=True)
