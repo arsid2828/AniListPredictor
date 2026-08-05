@@ -349,7 +349,7 @@ def compute_activity_stats(activities, media_type="ANIME", anime_reference_minut
     if not activities:
         return None
         
-    valid_statuses = ['watched episode', 'completed'] if media_type == "ANIME" else ['read chapter', 'completed']
+    valid_statuses = ['watched episode', 'rewatched episode', 'completed'] if media_type == "ANIME" else ['read chapter', 'reread chapter', 'completed']
     rows = []
     
     for act in activities:
