@@ -21,6 +21,7 @@ from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, V
 from sklearn.naive_bayes import GaussianNB
 from sklearn.feature_selection import SelectFromModel
 
+from .api import AniListAccessError
 from .dataset import build_user_dataframe, build_user_manga_dataframe
 from .features import engineer_features, engineer_manga_features
 
@@ -476,6 +477,8 @@ def train_and_evaluate_all_models(username: str, use_optuna: bool = True, progre
         _report_progress(progress_callback, 1.0, "Anime training completed")
         
         return model_artifact
+    except AniListAccessError as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         logger.exception("Anime training pipeline failed for %s", username)
         return {"status": "error", "message": f"Anime training failed: {exc.__class__.__name__}: {exc}"}
@@ -515,6 +518,8 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True, 
         _report_progress(progress_callback, 1.0, "Manga training completed")
         
         return model_artifact
+    except AniListAccessError as exc:
+        return {"status": "error", "message": str(exc)}
     except Exception as exc:
         logger.exception("Manga training pipeline failed for %s", username)
         return {"status": "error", "message": f"Manga training failed: {exc.__class__.__name__}: {exc}"}

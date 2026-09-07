@@ -62,6 +62,36 @@ def _is_cache_valid(cache_path, ttl_hours=CACHE_TTL_HOURS):
 
 API_URL = "https://graphql.anilist.co"
 
+
+class AniListAccessError(RuntimeError):
+    """AniList refused the request; repeating it immediately cannot fix access."""
+
+
+def _raise_access_error(response):
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = {}
+    errors = payload.get("errors") if isinstance(payload, dict) else None
+    detail = ""
+    if isinstance(errors, list) and errors and isinstance(errors[0], dict):
+        detail = str(errors[0].get("message") or "").strip()
+
+    if "temporarily disabled" in detail.lower():
+        message = (
+            "AniList has temporarily disabled its API due to service stability issues. "
+            "Please try again later, when AniList restores the service."
+        )
+    else:
+        message = "AniList refused access to its API (403)."
+        if detail:
+            message += f" {detail}"
+        else:
+            message += " Please try again later."
+    _set_last_api_error(message)
+    logger.warning("AniList access refused: %s", message)
+    raise AniListAccessError(message)
+
 # We request in point 10 decimal format
 USER_LIST_QUERY = """
 query ($userName: String, $chunk: Int) {
@@ -410,7 +440,12 @@ def fetch_with_retry(query, variables, retries=3):
                 logger.warning("AniList rate limit hit on attempt %s/%s. Sleeping for %s seconds.", attempt + 1, retries, retry_after)
                 time.sleep(retry_after)
                 continue
-                
+
+            # AniList reports service shutdowns in the GraphQL body of a 403.
+            # Read that reason before raise_for_status hides it behind HTTPError.
+            if response.status_code == 403:
+                _raise_access_error(response)
+
             response.raise_for_status()
             data = response.json()
             
