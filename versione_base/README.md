@@ -1,21 +1,18 @@
-# Versione Base
+# Versione base
 
-This folder contains a detached base variant of the project for academic presentation.
+Variante autonoma per la presentazione accademica. Include la dashboard principale con analisi predittiva e raccomandazioni per anime e manga, un insieme ridotto di modelli e i flussi Cold Start.
 
-Run it with:
+Installa le dipendenze indicate nel [README principale](../README.md). Da PowerShell puoi avviare la variante con lo script nella radice del repository.
 
 ```powershell
 .\run_versione_base.ps1
 ```
 
-Or directly:
+Per avviarla manualmente, esegui questi comandi dalla radice del progetto.
 
-```powershell
-python -m streamlit run versione_base/app/main.py --server.port 8510
+```bash
+cd versione_base
+python -m streamlit run app/main.py --server.port 8510 --server.address 127.0.0.1
 ```
 
-Notes:
-- This variant uses its own `versione_base/cache`, `versione_base/data`, and `versione_base/models` folders.
-- It only exposes the main page workflow.
-- It removes advanced models that are not part of the base academic scope.
-- It filters adult content and blocked genres/tags from search, training data, and recommendations.
+La variante usa le proprie cartelle `cache/`, `data/` e `models/` dentro `versione_base/`.

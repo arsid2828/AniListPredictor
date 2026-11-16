@@ -14,7 +14,6 @@ for path in (str(ROOT_DIR), str(APP_DIR)):
         sys.path.insert(0, path)
 
 from shared import (
-    ADMIN_EMAIL,
     delete_artifact_by_type,
     delete_local_user_artifacts,
     get_all_runtime_usernames,
@@ -96,7 +95,7 @@ require_admin_user()
 render_user_badge()
 
 st.title("🛠️ Admin")
-st.caption(f"Owner-only runtime data console for `{ADMIN_EMAIL}`.")
+st.caption("Owner-only runtime data console.")
 
 with st.expander("Saved Profiles Registry", expanded=True):
     registry_df = _viewer_registry_rows()

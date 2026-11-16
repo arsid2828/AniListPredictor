@@ -16,6 +16,7 @@ for path in (str(ROOT_DIR), str(APP_DIR)):
 from shared import init_session_state, inject_css, render_app_disclaimer, render_user_badge
 from src.api import CACHE_DIR
 from src.dataset import DATA_DIR
+from src.media_metadata import GENRES_LIST as ALL_GENRES
 
 
 ARENA_CSS = """
@@ -58,29 +59,6 @@ ARENA_CSS = """
     }
 </style>
 """
-
-ALL_GENRES = [
-    "Action",
-    "Adventure",
-    "Comedy",
-    "Drama",
-    "Ecchi",
-    "Fantasy",
-    "Hentai",
-    "Horror",
-    "Mahou Shoujo",
-    "Mecha",
-    "Music",
-    "Mystery",
-    "Psychological",
-    "Romance",
-    "Sci-Fi",
-    "Slice of Life",
-    "Sports",
-    "Supernatural",
-    "Thriller",
-]
-
 
 def _load_media_pool(username: str, is_manga: bool):
     csv_name = f"{username.lower()}_manga_clean.csv" if is_manga else f"{username.lower()}_clean.csv"

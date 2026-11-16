@@ -32,7 +32,6 @@ MODEL_RETENTION_DAYS = 7
 DEFAULT_SESSION_MAX_MINUTES = 720
 DEFAULT_DISPLAY_TIMEZONE = "Europe/Rome"
 PROFILE_OWNER_REGISTRY_PATH = CACHE_DIR / "profile_owners.json"
-ADMIN_EMAIL = "arsidhocia@gmail.com"
 
 MAX_USERNAME_LEN = 50
 MAX_SEARCH_LEN = 100
@@ -304,7 +303,9 @@ def _get_current_user_email():
 
 
 def is_admin_user():
-    return _get_current_user_email() == ADMIN_EMAIL
+    admin_email = _normalize_email(_secret_section("access").get("admin_email"))
+    email = _get_current_user_email()
+    return bool(admin_email and email == admin_email and _is_email_authorized(email))
 
 
 def require_admin_user():

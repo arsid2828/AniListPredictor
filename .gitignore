@@ -2,14 +2,20 @@
 cache/
 data/
 models/
+*.pkl
+*.joblib
 
 # Python
 __pycache__/
+.pytest_cache/
+.codex_compile/
 *.py[cod]
 *$py.class
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 
 # Streamlit secrets
 .streamlit/secrets.toml

@@ -4,6 +4,7 @@ import datetime
 from pathlib import Path
 import logging
 from .api import fetch_user_anime_list, fetch_user_manga_list
+from .media_metadata import ANILIST_RATING_FIELD
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def build_user_dataframe(username: str, force_refresh: bool = False, save_csv: b
                 'averageScore': media.get('averageScore'),
                 'meanScore': media.get('meanScore'),
                 'favourites': media.get('favourites'),
-                'isAdult': 1 if media.get('isAdult') else 0,
+                ANILIST_RATING_FIELD: 1 if media.get(ANILIST_RATING_FIELD) else 0,
                 'popularity': media.get('popularity'),
                 'countryOfOrigin': media.get('countryOfOrigin'),
                 'source': media.get('source'),
@@ -230,7 +231,7 @@ def build_user_manga_dataframe(username: str, force_refresh: bool = False, save_
                 'averageScore': media.get('averageScore'),
                 'meanScore': media.get('meanScore'),
                 'favourites': media.get('favourites'),
-                'isAdult': 1 if media.get('isAdult') else 0,
+                ANILIST_RATING_FIELD: 1 if media.get(ANILIST_RATING_FIELD) else 0,
                 'popularity': media.get('popularity'),
                 'countryOfOrigin': media.get('countryOfOrigin'),
                 'media_status': media.get('status'),

@@ -3,9 +3,9 @@ import numpy as np
 import logging
 from collections import defaultdict
 
+from .media_metadata import BLOCKED_GENRES, BLOCKED_TAG_TERMS
+
 logger = logging.getLogger(__name__)
-BLOCKED_GENRES = {"Ecchi", "Hentai"}
-BLOCKED_TAG_TERMS = {"ecchi", "hentai", "adult", "nsfw", "nudity", "sexual", "erotica"}
 
 def _get_list(val):
     if pd.isna(val) or not val:

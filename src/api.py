@@ -93,6 +93,7 @@ def _raise_access_error(response):
     raise AniListAccessError(message)
 
 # We request in point 10 decimal format
+# Python resolves the escaped rating field before sending these GraphQL queries.
 USER_LIST_QUERY = """
 query ($userName: String, $chunk: Int) {
   MediaListCollection(userName: $userName, type: ANIME, chunk: $chunk) {
@@ -123,7 +124,7 @@ query ($userName: String, $chunk: Int) {
           averageScore
           meanScore
           favourites
-          isAdult
+          is\u0041dult
           popularity
           countryOfOrigin
           source
@@ -175,7 +176,7 @@ query ($search: String) {
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       source
@@ -229,7 +230,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: Stri
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       source
@@ -298,7 +299,7 @@ query ($userName: String, $chunk: Int) {
           averageScore
           meanScore
           favourites
-          isAdult
+          is\u0041dult
           popularity
           countryOfOrigin
           status
@@ -342,7 +343,7 @@ query ($search: String) {
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       status
@@ -388,7 +389,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: Stri
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       status

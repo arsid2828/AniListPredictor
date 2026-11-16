@@ -1,12 +1,6 @@
 import numpy as np
 
-# Static Genre Definitions
-GENRES_LIST = [
-    "Action", "Adventure", "Comedy", "Drama", "Ecchi", 
-    "Fantasy", "Hentai", "Horror", "Mahou Shoujo", "Mecha", "Music", 
-    "Mystery", "Psychological", "Romance", "Sci-Fi", 
-    "Slice of Life", "Sports", "Supernatural", "Thriller"
-]
+from .media_metadata import GENRES_LIST
 
 FORMATS_LIST = ["TV", "MOVIE", "OVA", "ONA", "SPECIAL", "ANY"]
 LENGTHS_LIST = ["SHORT (<14)", "MEDIUM (14-26)", "LONG (27+)", "ANY"]

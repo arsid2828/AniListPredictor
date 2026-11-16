@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.api import search_anime_by_title, get_candidate_anime_for_recommendations, search_manga_by_title, get_candidate_manga_for_recommendations
 from src.dataset import build_user_dataframe, build_user_manga_dataframe

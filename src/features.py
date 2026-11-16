@@ -4,6 +4,8 @@ import logging
 from collections import defaultdict
 from typing import Dict, Any, Optional
 
+from .media_metadata import ANILIST_RATING_FIELD
+
 logger = logging.getLogger(__name__)
 
 def _get_list(val):
@@ -253,7 +255,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df.loc[unreleased_mask, 'favourites'] = np.nan
     df['favourites'] = np.log1p(df['favourites'].fillna(fav_median))
     
-    df['isAdult'] = df['isAdult'].fillna(0).astype(int)
+    df[ANILIST_RATING_FIELD] = df[ANILIST_RATING_FIELD].fillna(0).astype(int)
     
     # New features: source material, completion ratio, rewatch count
     df['source'] = df['source'].fillna('UNKNOWN')
@@ -285,7 +287,7 @@ def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine Base, Numerical, Historical, and Categorical
-    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
+    num_cols = ['episodes', 'duration', 'seasonYear', 'averageScore', 'popularity', 'favourites', ANILIST_RATING_FIELD, 'completion_ratio', 'repeat']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
                  'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  
@@ -633,7 +635,7 @@ def build_inference_feature_row(anime_data_dict, inference_context):
         'averageScore': float(average_score) / 10.0,
         'popularity': float(popularity),
         'favourites': float(favourites),
-        'isAdult': 1 if anime_data_dict.get('isAdult') else 0,
+        ANILIST_RATING_FIELD: 1 if anime_data_dict.get(ANILIST_RATING_FIELD) else 0,
         'completion_ratio': 1.0 if not episodes else float(np.clip((episodes / episodes), 0, 1)),
         'repeat': 0,
     }
@@ -730,7 +732,7 @@ def build_manga_inference_feature_row(manga_data_dict, inference_context):
         'averageScore': float(average_score) / 10.0,
         'popularity': float(popularity),
         'favourites': float(favourites),
-        'isAdult': 1 if manga_data_dict.get('isAdult') else 0,
+        ANILIST_RATING_FIELD: 1 if manga_data_dict.get(ANILIST_RATING_FIELD) else 0,
         'completion_ratio': 1.0 if not chapters else float(np.clip((chapters / chapters), 0, 1)),
         'repeat': 0,
     }
@@ -830,7 +832,7 @@ def engineer_manga_features(df: pd.DataFrame):
         df.loc[unreleased_mask, 'favourites'] = np.nan
     df['favourites'] = np.log1p(df['favourites'].fillna(fav_median))
     
-    df['isAdult'] = df['isAdult'].fillna(0).astype(int)
+    df[ANILIST_RATING_FIELD] = df[ANILIST_RATING_FIELD].fillna(0).astype(int)
     
     # New features: completion ratio, rewatch count
     df['progress'] = df['progress'].fillna(0)
@@ -858,7 +860,7 @@ def engineer_manga_features(df: pd.DataFrame):
         df_cat[f'tag_{t}'] = df['tags'].apply(lambda x: _get_tags_with_ranks(x).get(t, 0.0) / 100.0)
 
     # Combine
-    num_cols = ['chapters', 'volumes', 'releaseYear', 'averageScore', 'popularity', 'favourites', 'isAdult', 'completion_ratio', 'repeat']
+    num_cols = ['chapters', 'volumes', 'releaseYear', 'averageScore', 'popularity', 'favourites', ANILIST_RATING_FIELD, 'completion_ratio', 'repeat']
     hist_cols = ['hist_user_mean', 'hist_user_std', 'recent_mean_score', 'hist_count', 'hist_format_affinity', 'hist_genre_affinity', 'hist_genre_freq', 
                  'hist_tag_affinity', 'hist_tag_freq', 'hist_studio_affinity', 'hist_studio_freq', 'hist_producer_affinity', 'hist_producer_freq', 'hist_creator_affinity', 'hist_creator_freq', 'hist_franchise_count', 'hist_franchise_mean', 'hist_char_count', 'hist_char_mean', 'hist_global_diff', 'hist_global_mae']
                  

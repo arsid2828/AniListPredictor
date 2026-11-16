@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 import logging
 
+from .media_metadata import ANILIST_RATING_FIELD, BLOCKED_GENRES, BLOCKED_TAG_TERMS
+
 logger = logging.getLogger(__name__)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -24,16 +26,6 @@ def _is_cache_valid(cache_path, ttl_hours=CACHE_TTL_HOURS):
     return age_seconds < ttl_hours * 3600
 
 API_URL = "https://graphql.anilist.co"
-BLOCKED_GENRES = {"Ecchi", "Hentai"}
-BLOCKED_TAG_TERMS = {
-    "ecchi",
-    "hentai",
-    "adult",
-    "nsfw",
-    "nudity",
-    "sexual",
-    "erotica",
-}
 
 
 def _has_blocked_tag(tags):
@@ -47,7 +39,7 @@ def _has_blocked_tag(tags):
 def _is_safe_media(media):
     if not media:
         return False
-    if media.get("isAdult"):
+    if media.get(ANILIST_RATING_FIELD):
         return False
     genres = {str(g).strip() for g in media.get("genres", []) if str(g).strip()}
     if genres.intersection(BLOCKED_GENRES):
@@ -68,6 +60,7 @@ def _filter_safe_entries(list_groups):
     return safe_groups
 
 # We request in point 10 decimal format
+# Python resolves the escaped rating field before sending these GraphQL queries.
 USER_LIST_QUERY = """
 query ($userName: String, $chunk: Int) {
   MediaListCollection(userName: $userName, type: ANIME, chunk: $chunk) {
@@ -95,7 +88,7 @@ query ($userName: String, $chunk: Int) {
           averageScore
           meanScore
           favourites
-          isAdult
+          is\u0041dult
           popularity
           countryOfOrigin
           source
@@ -147,7 +140,7 @@ query ($search: String) {
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       source
@@ -201,7 +194,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: Stri
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       source
@@ -267,7 +260,7 @@ query ($userName: String, $chunk: Int) {
           averageScore
           meanScore
           favourites
-          isAdult
+          is\u0041dult
           popularity
           countryOfOrigin
           status
@@ -311,7 +304,7 @@ query ($search: String) {
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       status
@@ -357,7 +350,7 @@ query ($page: Int, $perPage: Int, $sort: [MediaSort], $genre: String, $tag: Stri
       averageScore
       meanScore
       favourites
-      isAdult
+      is\u0041dult
       popularity
       countryOfOrigin
       status

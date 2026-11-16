@@ -479,9 +479,9 @@ def train_and_evaluate_all_models(username: str, use_optuna: bool = True, progre
         return model_artifact
     except AniListAccessError as exc:
         return {"status": "error", "message": str(exc)}
-    except Exception as exc:
-        logger.exception("Anime training pipeline failed for %s", username)
-        return {"status": "error", "message": f"Anime training failed: {exc.__class__.__name__}: {exc}"}
+    except Exception:
+        logger.exception("Anime training pipeline failed")
+        return {"status": "error", "message": "Anime training failed. Please try again later."}
 
 def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True, progress_callback=None) -> Dict[str, Any]:
     """Runs the entire MANGA pipeline for a username."""
@@ -520,9 +520,9 @@ def train_and_evaluate_all_manga_models(username: str, use_optuna: bool = True, 
         return model_artifact
     except AniListAccessError as exc:
         return {"status": "error", "message": str(exc)}
-    except Exception as exc:
-        logger.exception("Manga training pipeline failed for %s", username)
-        return {"status": "error", "message": f"Manga training failed: {exc.__class__.__name__}: {exc}"}
+    except Exception:
+        logger.exception("Manga training pipeline failed")
+        return {"status": "error", "message": "Manga training failed. Please try again later."}
 
 if __name__ == "__main__":
     test_username = os.environ.get("TEST_USERNAME", "example_user")

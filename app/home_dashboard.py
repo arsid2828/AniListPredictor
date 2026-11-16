@@ -179,13 +179,13 @@ if mode == "AniList Profile (Machine Learning)":
                         username_lower,
                         progress_callback=update_training_progress,
                     )
-            except Exception as exc:
+            except Exception:
                 logger.exception("Training failed.")
                 st.session_state[model_trained_key] = False
                 st.session_state.pop(last_train_key, None)
                 progress_bar.empty()
                 progress_text.empty()
-                st.error(f"Training failed: {exc.__class__.__name__}: {exc}")
+                st.error("Training failed. Please try again later.")
                 st.stop()
 
             if isinstance(result, dict) and result.get("status") in ["error", "fallback"]:
@@ -315,7 +315,7 @@ if mode == "AniList Profile (Machine Learning)":
         st.markdown("#### 🎯 Advanced Filters (Optional)")
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
-            genres_opts = ["None", "Action", "Adventure", "Comedy", "Drama", "Ecchi", "Fantasy", "Hentai", "Horror", "Mahou Shoujo", "Mecha", "Music", "Mystery", "Psychological", "Romance", "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"]
+            genres_opts = ["None", *GENRES_LIST]
             sel_genre = st.selectbox("Genre:", genres_opts)
             sel_genre = None if sel_genre == "None" else sel_genre
         with col_f2:
